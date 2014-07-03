@@ -39,7 +39,7 @@
 #define DISPLAYWINDOW_H
 
 #include <gtk/gtk.h>
-
+#include "stream.h"
 
 typedef struct {
 	GtkWidget	*window;
@@ -73,6 +73,7 @@ typedef struct {
 	GtkWidget	*window;
 	GtkWidget	*drawingarea;
 	GtkWidget	*scrollarea;
+        GtkWidget       *streamwindow;
 	GtkUIManager	*ui;
 	GtkActionGroup	*action_group;
 	int             n_pixbufs;
@@ -87,6 +88,7 @@ typedef struct {
 
 	struct hdfile	*hdfile;
 	struct image	*image;
+        Stream *stream;
 
 	/* Dialog boxes */
 	BinningDialog	*binning_dialog;

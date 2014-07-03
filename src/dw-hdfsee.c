@@ -52,6 +52,24 @@
 #include "detector.h"
 #include "filters.h"
 
+#define FEATURE_SPOT 9990
+#define FEATURE_PREDICTION 10000
+
+enum {
+  COLUMN_ID = 0,
+  COLUMN_FILENAME,
+  COLUMN_SPOTS,
+  COLUMN_CRYSTALS,
+  COLUMN_OFFSET
+};
+
+struct newhdf {
+	DisplayWindow *dw;
+	GtkWidget *widget;
+	char name[1024];
+};
+
+static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh);
 
 static void displaywindow_error(DisplayWindow *dw, const char *message)
 {
@@ -334,7 +352,9 @@ static int draw_stuff(cairo_surface_t *surf, DisplayWindow *dw)
 	cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
 	cairo_fill(cr);
 
-	if ( dw->image == NULL ) return 0;
+	// actually, the first condition never happens since image is calloc-ed 
+	// in displaywindow_open()
+	if ( dw->image == NULL || dw->image->data == NULL) return 0;
 
 	/* Set up basic coordinate system
 	 *  - origin in the centre, y upwards. */
@@ -447,25 +467,34 @@ static int draw_stuff(cairo_surface_t *surf, DisplayWindow *dw)
 
 			cairo_arc(cr, x/dw->binning, y/dw->binning,
 				  radius, 0.0, 2.0*M_PI);
-			switch ( dw->scale ) {
-
-				case SCALE_COLOUR :
-				cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);
-				break;
-
-				case SCALE_MONO :
-				cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-				break;
-
-				case SCALE_INVMONO:
-				cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-				break;
-
+			if (f->intensity == FEATURE_PREDICTION + 0) { // first lattice
+				cairo_set_source_rgb(cr, 1.0, 0.0, 0.0);
+			} else if (f->intensity == FEATURE_PREDICTION + 1) { // second lattice
+				cairo_set_source_rgb(cr, 0.0, 1.0, 0.0); 
+			} else if (f->intensity == FEATURE_PREDICTION + 2) { // third lattice
+				cairo_set_source_rgb(cr, 0.0, 0.0, 1.0);
+			} else {
+				switch ( dw->scale ) {
+					case SCALE_COLOUR :
+					cairo_set_source_rgb(cr, 1.0, 1.0, 0.0);
+					break;
+				
+					case SCALE_MONO :
+					cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+					break;
+				
+					case SCALE_INVMONO:
+					cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+					break;
+				}
+			}
+			if (f->rx == FEATURE_SPOT) {
+				cairo_set_line_width(cr, 1.50/dw->binning);
+			} else {
+				cairo_set_line_width(cr, 0.75/dw->binning);
 			}
 
-			cairo_set_line_width(cr, 0.75/dw->binning);
 			cairo_stroke(cr);
-;
 		}
 
 	}
@@ -496,9 +525,9 @@ static void set_window_size(DisplayWindow *dw)
 	gint width;
 	GdkGeometry geom;
 
-	if ( dw->image == NULL ) {
-		dw->width = 320;
-		dw->height = 320;
+	if ( dw->image == NULL || dw->image->data == NULL) {
+		dw->width = 1024;
+		dw->height = 1024;
 	} else {
 
 		double min_x, min_y, max_x, max_y;
@@ -561,7 +590,7 @@ static void displaywindow_update(DisplayWindow *dw)
 		free(dw->pixbufs);
 	}
 
-	if ( dw->image != NULL ) {
+	if ( dw->image != NULL && dw->image->data != NULL) {
 		dw->pixbufs = render_panels(dw->image, dw->binning,
 		                            dw->scale, dw->boostint,
 		                            &dw->n_pixbufs);
@@ -1103,8 +1132,8 @@ static int load_geometry_file(DisplayWindow *dw, struct image *image,
 	}
 	fill_in_values(geom, dw->hdfile);
 
-	if ( (1+geom->max_fs != dw->image->width)
-	  || (1+geom->max_ss != dw->image->height) ) {
+	if (dw->image->data != NULL && ((1+geom->max_fs != dw->image->width)
+					|| (1+geom->max_ss != dw->image->height)) ) {
 
 		displaywindow_error(dw, "Geometry doesn't match image.");
 		return -1;
@@ -1305,6 +1334,210 @@ struct savedialog {
 };
 
 
+
+static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow *dw) {
+	GtkTreeIter iter;
+	GtkTreeModel *model;
+	gchar *filename;
+	long offset;
+  
+	if (gtk_tree_selection_get_selected (selection, &model, &iter)) {
+		gtk_tree_model_get (model, &iter, COLUMN_FILENAME, &filename, COLUMN_OFFSET, &offset, -1);
+    
+		// TODO: resolve relative path
+		struct hdfile *newhdf = hdfile_open(filename);
+		if (!newhdf) {
+			printf("Failed to open image %s. Is the current directory OK?\n", filename);
+			g_free(filename);
+			return;
+		}
+
+		// close current image.
+		if (dw->hdfile) hdfile_close(dw->hdfile); // free() is called within
+		if ( dw->image != NULL ) {
+			image_feature_list_free(dw->image->features);
+			free(dw->image->filename);
+			free(dw->image->data);
+			free(dw->image->flags);
+			free(dw->image);
+		}
+
+		dw->image = calloc(1, sizeof(struct image));
+		dw->hdfile = newhdf;
+    
+		// set new title
+		char *bn = safe_basename(filename);
+		char *title = malloc(strlen(bn)+14);
+		sprintf(title, "%s - hdfsee", bn);
+		free(bn);
+		gtk_window_set_title(GTK_WINDOW(dw->window), title);
+		free(title);
+		dw->image->filename = strdup(bn); // otherwise "Save Image" crashes!
+    
+		// reload image
+		struct newhdf nh;
+		nh.dw = dw;
+		nh.name[0] = '\0';
+		nh.widget = NULL;
+		displaywindow_newhdf(NULL, &nh); //TODO: CHECKME: what happens if this fails?
+    
+		// load spot list
+		if (dw->stream != NULL && seek_stream(dw->stream, offset) == 0) {
+			int rval, j;
+      
+			rval = read_chunk(dw->stream, dw->image);
+			if (rval) {
+				printf("Failed to load stream for image %s \n", dw->image->filename);
+			} else {
+				for (j = 0; j < dw->image->num_peaks; j++) {
+					struct imagefeature *feature = image_get_feature(dw->image->features, j);
+					if (feature == NULL) continue;
+					feature->rx = FEATURE_SPOT; // FIXME: reciprocal_x field is hijacked!
+				}
+
+				for (j = 0; j < dw->image->n_crystals; j++) {
+					Crystal *cr = dw->image->crystals[j];
+
+					// Copy predictions into feature list
+					Reflection *refl;
+					RefListIterator *iter;
+
+					for (refl = first_refl(crystal_get_reflections(cr), &iter);
+					     refl != NULL;
+					     refl = next_refl(refl, iter)) {
+						signed int h, k, l;
+						double fs, ss;
+
+						get_indices(refl, &h, &k, &l);
+						get_detector_pos(refl, &fs, &ss);
+					
+						char name[32];
+						snprintf(name, 31, "%i %i %i", h, k, l);
+
+						// FIXME: intensity field is hijacked!
+						image_add_feature(dw->image->features, fs, ss, dw->image, j + FEATURE_PREDICTION,
+						strdup(name));
+					}			
+	  
+					reflist_free(crystal_get_reflections(cr));
+					cell_free(crystal_get_cell(cr));
+					crystal_free(cr);		  
+				}
+			}
+		}
+		
+		redraw_window(dw);
+    		g_free(filename);
+	}
+}
+
+static gint open_stream(const char *filename, DisplayWindow *dw) {
+	int i, j, rval;
+	Stream *st = open_stream_for_read(filename);
+
+	if (st == NULL ) {
+		ERROR("Failed to open stream %s.\n", filename);
+		return 1;
+	}
+
+	// close current stream and table
+	if (dw->stream) close_stream(dw->stream);
+	dw->stream = st;
+
+	if (dw->streamwindow) gtk_widget_destroy(GTK_WIDGET(dw->streamwindow));
+	dw->streamwindow = NULL;
+
+	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	GtkWidget *scwindow = gtk_scrolled_window_new(NULL, NULL);
+	GtkWidget *view = gtk_tree_view_new();
+	GtkListStore *data = gtk_list_store_new(5, G_TYPE_INT, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_LONG);
+	GtkTreeIter iter;
+	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+	//GtkTreeViewColumn *col1 = gtk_tree_view_column_new_with_attributes ("Chunk ID",
+	//                                               renderer, "text", COLUMN_ID, NULL);
+	GtkTreeViewColumn *col2 = gtk_tree_view_column_new_with_attributes ("File Name",
+	                                                 renderer, "text", COLUMN_FILENAME, NULL);
+	GtkTreeViewColumn *col3 = gtk_tree_view_column_new_with_attributes ("#Spots",
+	                                                 renderer, "text", COLUMN_SPOTS, NULL);
+	GtkTreeViewColumn *col4 = gtk_tree_view_column_new_with_attributes ("#Crystals",
+	                                                 renderer, "text", COLUMN_CRYSTALS, NULL);
+
+	//gtk_tree_view_append_column(GTK_TREE_VIEW(view), col1);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col2);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col3);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col4);
+
+	gtk_tree_view_set_model(GTK_TREE_VIEW(view), GTK_TREE_MODEL(data));
+	g_object_unref(data);
+	gtk_container_add(GTK_CONTAINER(scwindow), view);
+	gtk_container_add(GTK_CONTAINER(window), scwindow);
+	gtk_window_resize(GTK_WINDOW(window), 500, 1024);
+	gtk_widget_show_all(window);
+	dw->streamwindow = window;
+  
+	GtkTreeSelection *select;
+	select = gtk_tree_view_get_selection(GTK_TREE_VIEW(view));
+	gtk_tree_selection_set_mode(select, GTK_SELECTION_SINGLE);
+	g_signal_connect(G_OBJECT(select), "changed",
+	                 G_CALLBACK(stream_selection_changed), dw);
+	// TODO: CHECKME: Do I have to clean up something in the destroy callback?
+  
+	long stream_offset = 0;
+	i = 0;
+	while (1) {
+		if (i++ > 5000) {
+			displaywindow_error(dw,
+			  "The maximum supported number of entries is 5000. Stopped loading the stream.");
+			break;
+		}
+
+		struct image image;
+		image.det = NULL;
+    
+		/* Get data from next chunk */
+		rval = read_chunk(st, &image);
+		if (rval) {
+			printf("Failed to load stream.\n");
+			break;
+		}
+		gtk_list_store_append(data, &iter);
+		gtk_list_store_set(data, &iter, COLUMN_ID, i, COLUMN_FILENAME, image.filename, 
+		                   COLUMN_SPOTS, image.num_peaks, COLUMN_CRYSTALS, image.n_crystals, 
+		                   COLUMN_OFFSET, stream_offset, -1);
+    
+		//  free_all_crystals(&image); // I don't know why but this doesn't work
+		for (j = 0; j<image.n_crystals; j++ ) {
+			Crystal *cr = image.crystals[j];
+			
+			reflist_free(crystal_get_reflections(cr));
+			cell_free(crystal_get_cell(cr));
+			crystal_free(cr);		  
+		}
+		stream_offset = ftell_stream(st);
+    
+		free(image.filename);
+		image_feature_list_free(image.features);
+		free(image.crystals);
+	}
+	return 0;
+}
+
+static gint displaywindow_open_response(GtkWidget *d, gint response,
+                                        DisplayWindow *dw)
+{
+	int rval;
+
+	if ( response == GTK_RESPONSE_ACCEPT ) {
+		char *file = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(d));
+		rval = open_stream(file, dw);
+		g_free(file);
+	}
+
+	gtk_widget_destroy(d);
+
+	return 0;
+}
+
 static gint displaywindow_save_response(GtkWidget *d, gint response,
                                         struct savedialog *cd)
 {
@@ -1345,7 +1578,6 @@ static gint displaywindow_save_response(GtkWidget *d, gint response,
 
 	return 0;
 }
-
 
 static gint displaywindow_save(GtkWidget *widget, DisplayWindow *dw)
 {
@@ -1407,6 +1639,24 @@ static gint displaywindow_save(GtkWidget *widget, DisplayWindow *dw)
 	return 0;
 }
 
+static gint displaywindow_open_menu(GtkWidget *widget, DisplayWindow *dw)
+{
+	GtkWidget *d;
+
+	d = gtk_file_chooser_dialog_new("Open Image",
+	                                GTK_WINDOW(dw->window),
+	                                GTK_FILE_CHOOSER_ACTION_OPEN,
+	                                GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
+	                                GTK_STOCK_OPEN, GTK_RESPONSE_ACCEPT,
+	                                NULL);
+
+	g_signal_connect(G_OBJECT(d), "response",
+	                 G_CALLBACK(displaywindow_open_response), dw);
+
+	gtk_widget_show_all(d);
+
+	return 0;
+}
 
 static gint displaywindow_set_colscale(GtkWidget *widget, DisplayWindow *dw)
 {
@@ -1654,6 +1904,8 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 	GtkActionEntry entries[] = {
 
 		{ "FileAction", NULL, "_File", NULL, NULL, NULL },
+		{ "OpenAction", GTK_STOCK_OPEN, "Open Stream...", NULL, NULL,
+			G_CALLBACK(displaywindow_open_menu) },
 		{ "SaveAction", GTK_STOCK_SAVE, "Save Image...", NULL, NULL,
 			G_CALLBACK(displaywindow_save) },
 		{ "CloseAction", GTK_STOCK_CLOSE, "_Close", NULL, NULL,
@@ -1754,23 +2006,15 @@ static void do_filters(DisplayWindow *dw)
 	}
 }
 
-
-struct newhdf {
-	DisplayWindow *dw;
-	GtkWidget *widget;
-	char name[1024];
-};
-
 static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh)
 {
-	gboolean a;
-
 	if ( nh->dw->not_ready_yet ) return 0;
 
-	a = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(nh->widget));
-	if ( !a ) return 0;
-
-	hdfile_set_image(nh->dw->hdfile, nh->name);
+	if (nh->name[0] == 0) {
+		hdfile_set_first_image(nh->dw->hdfile, "/");
+	} else {
+		 hdfile_set_image(nh->dw->hdfile, nh->name);
+	}
 	hdf5_read(nh->dw->hdfile, nh->dw->image, 0);
 
 	/* Check that the geometry still fits */
@@ -2285,6 +2529,8 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	dw->motion_callback = 0;
 	dw->numbers_window = NULL;
 	dw->image = NULL;
+	dw->stream = NULL;
+	dw->streamwindow = NULL;
 	dw->use_geom = 0;
 	dw->show_rings = show_rings;
 	dw->show_peaks = 0;
@@ -2316,30 +2562,32 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 
 	/* Open the file, if any */
 	if ( filename != NULL ) {
-
-		dw->hdfile = hdfile_open(filename);
-		if ( dw->hdfile == NULL ) {
-			free(dw);
-			return NULL;
-		} else {
-			int fail = -1;
-
-			if ( element == NULL ) {
-				fail = hdfile_set_first_image(dw->hdfile, "/");
-			} else {
-				fail = hdfile_set_image(dw->hdfile, element);
-			}
-
-			if ( !fail ) {
-				dw->image->filename = strdup(filename);
-				hdf5_read(dw->hdfile, dw->image, 0);
-			} else {
-				ERROR("Couldn't select path\n");
+		// Surprisingly, hdfile_open succeeds with a stream file and ends up with SEGV!
+		// Thus, we must test stream first
+		if (open_stream(filename, dw) != 0) {
+			dw->hdfile = hdfile_open(filename);
+			if (dw->hdfile == NULL) {
 				free(dw);
 				return NULL;
+			} else {
+				int fail = -1;
+
+				if ( element == NULL ) {
+					fail = hdfile_set_first_image(dw->hdfile, "/");
+				} else {
+					fail = hdfile_set_image(dw->hdfile, element);
+				}
+
+				if ( !fail ) {
+					dw->image->filename = strdup(filename);
+					hdf5_read(dw->hdfile, dw->image, 0);
+				} else {
+					ERROR("Couldn't select path\n");
+					free(dw);
+					return NULL;
+				}
 			}
 		}
-
 	} else {
 		free(dw);
 		return NULL;
@@ -2382,7 +2630,7 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	g_signal_connect(GTK_OBJECT(dw->drawingarea), "expose-event",
 			 G_CALLBACK(displaywindow_expose), dw);
 
-	gtk_window_set_resizable(GTK_WINDOW(dw->window), FALSE);
+	gtk_window_set_resizable(GTK_WINDOW(dw->window), TRUE);
 	gtk_widget_show_all(dw->window);
 
 	w = gtk_ui_manager_get_widget(dw->ui, "/ui/displaywindow/view/usegeom");
@@ -2424,8 +2672,11 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 
 	// Keep the behaviour similar when loading an image from command line
 	// for compatibility with check_*** scripts
-	gtk_window_resize(GTK_WINDOW(dw->window), dw->width + 10,
-	                  dw->height + 30);
+	if (dw->stream == NULL)
+		gtk_window_resize(GTK_WINDOW(dw->window), dw->width + 10,
+	                          dw->height + 30);
+	else
+		gtk_window_resize(GTK_WINDOW(dw->window), 1024, 1024);
 
 	return dw;
 }

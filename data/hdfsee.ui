@@ -2,6 +2,7 @@
 	<menubar name="displaywindow">
 
 		<menu name="file" action="FileAction">
+			<menuitem name="open" action="OpenAction" /> 
 			<menuitem name="save" action="SaveAction" />
 			<separator />
 			<menuitem name="close" action="CloseAction" />
