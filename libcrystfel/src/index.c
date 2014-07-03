@@ -12,6 +12,7 @@
  *   2010-2011 Richard Kirian <rkirian@asu.edu>
  *   2012      Lorenzo Galli
  *   2013      Cornelius Gati <cornelius.gati@cfel.de>
+ *   2014      Takanori Nakane <nakane.t@gmail.com>
  *
  * This file is part of CrystFEL.
  *
@@ -37,6 +38,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <fenv.h>
 #include <string.h>
 #include <assert.h>
 
@@ -244,11 +246,61 @@ static int try_indexer(struct image *image, IndexingMethod indm,
 	return 0;
 }
 
+// Based on select_intersections() in geometry.c
+int check_indexed(struct image *image, Crystal *cryst) {
+	double ax, ay, az;
+	double bx, by, bz;
+	double cx, cy, cz;
+	const double min_dist = 0.25;
+	int i, nspots = 0, nindexed = 0;
+
+	/* Round towards nearest */
+	fesetround(1);
+
+	/* Cell basis vectors for this image */
+	cell_get_cartesian(crystal_get_cell(cryst), &ax, &ay, &az,
+	                   &bx, &by, &bz, &cx, &cy, &cz);
+
+	/* Loop over peaks, checking proximity to nearest reflection */
+	for ( i=0; i<image_feature_count(image->features); i++ ) {
+
+		struct imagefeature *f;
+		struct rvec q;
+		double h, k, l, hd, kd, ld;
+		double dsq;
+
+		f = image_get_feature(image->features, i);
+		if ( f == NULL ) continue;
+		nspots++;
+		/* Reciprocal space position of found peak */
+		q = get_q(image, f->fs, f->ss, NULL, 1.0/image->lambda);
+
+		/* Decimal and fractional Miller indices of nearest
+		 * reciprocal lattice point */
+		hd = q.u * ax + q.v * ay + q.w * az;
+		kd = q.u * bx + q.v * by + q.w * bz;
+		ld = q.u * cx + q.v * cy + q.w * cz;
+		h = lrint(hd);
+		k = lrint(kd);
+		l = lrint(ld);
+
+		/* Check distance */
+		dsq = pow(h-hd, 2.0) + pow(k-kd, 2.0) + pow(l-ld, 2.0);
+
+		if ( sqrt(dsq) < min_dist ) {
+		  image_remove_feature(image->features, i);
+		  nindexed++;
+		}
+	}
+//	printf("indexed %d / %d spots\n", nindexed, nspots);
+	return nindexed;
+}
+
 
 void index_pattern(struct image *image,
                    IndexingMethod *indms, IndexingPrivate **iprivs)
 {
-	int n = 0;
+	int n = 0, stop = 0;
 
 	if ( indms == NULL ) return;
 
@@ -256,14 +308,28 @@ void index_pattern(struct image *image,
 	image->crystals = NULL;
 	image->n_crystals = 0;
 
-	while ( indms[n] != INDEXING_NONE ) {
+        n = 0;
+	image->indexed_by = INDEXING_NONE;
+	while ( indms[n] != INDEXING_NONE && stop == 0) {
+		while (try_indexer(image, indms[n], iprivs[n])) {
+			image->indexed_by = indms[n];
+			// stop = 1; break; // uncomment to disable multiple-lattice indexing
+			// TODO: Should be made switchable. Add INDEXING_MULTIPLE flag?
 
-		if ( try_indexer(image, indms[n], iprivs[n]) ) break;
+			if (check_indexed(image, image->crystals[image->n_crystals - 1]) < 10) {
+			// Sometimes the returned orientation matrix is really bad and no spot is removed. 
+			// It causes an infinite loop. Threshold 10 is just arbitrary, should be optimized.
+				image->n_crystals--;
+				crystal_free(image->crystals[image->n_crystals]);
+				image->crystals[image->n_crystals] = NULL;
+				break;
+			}
+		}
 		n++;
-
 	}
 
-	image->indexed_by = indms[n];
+	// otherwise, spots are not written out.
+	image_reactivate_features(image->features);
 }
 
 

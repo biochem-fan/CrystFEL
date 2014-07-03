@@ -8,6 +8,7 @@
  *
  * Authors:
  *   2009-2014 Thomas White <taw@physics.org>
+ *   2014      Takanori Nakane <nakane.t@gmail.com>
  *
  * This file is part of CrystFEL.
  *
@@ -193,6 +194,7 @@ extern void image_add_feature(ImageFeatureList *flist, double x, double y,
                               const char *name);
 
 extern void image_remove_feature(ImageFeatureList *flist, int idx);
+extern void image_reactivate_features(ImageFeatureList *flist);
 
 extern struct imagefeature *image_feature_closest(ImageFeatureList *flist,
                                                   double fs, double ss,

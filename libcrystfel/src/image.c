@@ -9,6 +9,7 @@
  * Authors:
  *   2011-2014 Thomas White <taw@physics.org>
  *   2014      Kenneth Beyerlein <kenneth.beyerlein@desy.de>
+ *   2014      Takanori Nakane <nakane.t@gmail.com>
  *
  * This file is part of CrystFEL.
  *
@@ -161,6 +162,13 @@ void image_remove_feature(ImageFeatureList *flist, int idx)
 	flist->features[idx].valid = 0;
 }
 
+void image_reactivate_features(ImageFeatureList *flist)
+{
+	int idx;
+	for (idx = 0; idx < flist->n_features; idx++) {
+		flist->features[idx].valid = 1;
+	}
+}
 
 void image_add_crystal(struct image *image, Crystal *cryst)
 {
