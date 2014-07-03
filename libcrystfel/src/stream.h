@@ -9,6 +9,7 @@
  * Authors:
  *   2010-2014 Thomas White <taw@physics.org>
  *   2011      Andrew Aquila
+ *   2014      Takanori Nakane <nakane.t@gmail.com>
  *
  * This file is part of CrystFEL.
  *
@@ -92,6 +93,8 @@ extern void write_command(Stream *st, int argc, char *argv[]);
 
 extern int rewind_stream(Stream *st);
 extern int is_stream(const char *filename);
+extern int seek_stream(Stream *st, long pos);
+extern long ftell_stream(Stream *st);
 
 #ifdef __cplusplus
 }
