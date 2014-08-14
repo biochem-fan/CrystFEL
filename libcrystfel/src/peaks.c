@@ -3,12 +3,12 @@
  *
  * Peak search and other image analysis
  *
- * Copyright © 2012-2013 Deutsches Elektronen-Synchrotron DESY,
- *                  a research centre of the Helmholtz Association.
+ * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
- *   2010-2013 Thomas White <taw@physics.org>
+ *   2010-2014 Thomas White <taw@physics.org>
  *   2012      Kenneth Beyerlein <kenneth.beyerlein@desy.de>
  *   2011      Andrew Martin <andrew.martin@desy.de>
  *   2011      Richard Kirian
@@ -191,7 +191,7 @@ static void add_crystal_to_mask(struct image *image, struct panel *p,
 			if ( fs < 0 ) continue;
 			if ( ss < 0 ) continue;
 
-			mask[fs + ss*w] = 1;
+			mask[fs + ss*w]++;
 
 		}
 		}
@@ -225,11 +225,11 @@ int *make_BgMask(struct image *image, struct panel *p, double ir_inn)
 
 /* Returns non-zero if peak has been vetoed.
  * i.e. don't use result if return value is not zero. */
-int integrate_peak(struct image *image, int cfs, int css,
-                   double *pfs, double *pss,
-                   double *intensity, double *sigma,
-                   double ir_inn, double ir_mid, double ir_out,
-                   int *bgPkMask, int *saturated)
+static int integrate_peak(struct image *image, int cfs, int css,
+                          double *pfs, double *pss,
+                          double *intensity, double *sigma,
+                          double ir_inn, double ir_mid, double ir_out,
+                          int *saturated)
 {
 	signed int dfs, dss;
 	double lim_sq, out_lim_sq, mid_lim_sq;
@@ -244,10 +244,11 @@ int integrate_peak(struct image *image, int cfs, int css,
 	double var;
 	double aduph;
 	int p_cfs, p_css, p_w, p_h;
+	signed int pn;
 
-	p = find_panel(image->det, cfs, css);
-	if ( p == NULL ) return 2;
-	if ( p->no_index ) return 3;
+	pn = find_panel_number(image->det, cfs, css);
+	if ( pn == -1 ) return 2;
+	p = &image->det->panels[pn];
 
 	if ( saturated != NULL ) *saturated = 0;
 
@@ -268,8 +269,6 @@ int integrate_peak(struct image *image, int cfs, int css,
 	for ( dss=-ir_out; dss<=+ir_out; dss++ ) {
 
 		double val;
-		uint16_t flags;
-		int idx;
 
 		/* Restrict to annulus */
 		if ( dfs*dfs + dss*dss > out_lim_sq ) continue;
@@ -280,33 +279,11 @@ int integrate_peak(struct image *image, int cfs, int css,
 		  || (p_cfs+dfs < 0 ) || (p_css+dss < 0) ) return 4;
 
 		/* Wandered into a bad region? */
-		if ( in_bad_region(image->det, p->min_fs+p_cfs+dfs,
-		                               p->min_ss+p_css+dss) )
-		{
+		if ( image->bad[pn][p_cfs+dfs + p->w*(p_css+dss)] ) {
 			return 14;
 		}
 
-		/* Check if there is a peak in the background region */
-		if ( (bgPkMask != NULL)
-		  && bgPkMask[(p_cfs+dfs) + p_w*(p_css+dss)] ) continue;
-
-		idx = dfs+cfs+image->width*(dss+css);
-
-		/* Veto this peak if we tried to integrate in a bad region */
-		if ( image->flags != NULL ) {
-
-			flags = image->flags[idx];
-
-			/* It must have all the "good" bits to be valid */
-			if ( !((flags & image->det->mask_good)
-			                   == image->det->mask_good) ) return 5;
-
-			/* If it has any of the "bad" bits, reject */
-			if ( flags & image->det->mask_bad ) return 6;
-
-		}
-
-		val = image->data[idx];
+		val = image->dp[pn][p_cfs+dfs + p->w*(p_css+dss)];
 
 		/* Check if peak contains saturation in bg region */
 		if ( (saturated != NULL) && (val > p->max_adu) ) *saturated = 1;
@@ -330,8 +307,6 @@ int integrate_peak(struct image *image, int cfs, int css,
 	for ( dss=-ir_inn; dss<=+ir_inn; dss++ ) {
 
 		double val;
-		uint16_t flags;
-		int idx;
 
 		/* Inner mask radius */
 		if ( dfs*dfs + dss*dss > lim_sq ) continue;
@@ -341,32 +316,16 @@ int integrate_peak(struct image *image, int cfs, int css,
 		  || (p_cfs+dfs < 0 ) || (p_css+dss < 0) ) return 8;
 
 		/* Wandered into a bad region? */
-		if ( in_bad_region(image->det, p->min_fs+p_cfs+dfs,
-		                               p->min_ss+p_css+dss) )
-		{
-			return 13;
+		if ( image->bad[pn][p_cfs+dfs + p->w*(p_css+dss)] ) {
+			return 15;
 		}
 
-		idx = dfs+cfs+image->width*(dss+css);
-
-		/* Veto this peak if we tried to integrate in a bad region */
-		if ( image->flags != NULL ) {
-
-			flags = image->flags[idx];
-
-			/* It must have all the "good" bits to be valid */
-			if ( !((flags & image->det->mask_good)
-			                   == image->det->mask_good) ) return 9;
-
-			/* If it has any of the "bad" bits, reject */
-			if ( flags & image->det->mask_bad ) return 10;
-
-		}
-
-		val = image->data[idx] - bg_mean;
+		val = image->dp[pn][p_cfs+dfs + p->w*(p_css+dss)];
 
 		/* Check if peak contains saturation */
 		if ( (saturated != NULL) && (val > p->max_adu) ) *saturated = 1;
+
+		val -= bg_mean;
 
 		pk_counts++;
 		pk_total += val;
@@ -505,7 +464,7 @@ static void search_peaks_in_panel(struct image *image, float threshold,
 		/* Centroid peak and get better coordinates. */
 		r = integrate_peak(image, mask_fs, mask_ss,
 		                   &f_fs, &f_ss, &intensity, &sigma,
-		                   ir_inn, ir_mid, ir_out, NULL, &saturated);
+		                   ir_inn, ir_mid, ir_out, &saturated);
 
 		if ( r ) {
 			/* Bad region - don't detect peak */
@@ -526,7 +485,8 @@ static void search_peaks_in_panel(struct image *image, float threshold,
 		}
 
 		/* Check for a nearby feature */
-		image_feature_closest(image->features, f_fs, f_ss, &d, &idx);
+		image_feature_closest(image->features, f_fs, f_ss, &d, &idx,
+		                      image->det);
 		if ( d < 2.0*ir_inn ) {
 			nrej_pro++;
 			continue;
@@ -700,7 +660,7 @@ void validate_peaks(struct image *image, double min_snr,
 
 		r = integrate_peak(image, f->fs, f->ss,
 		                   &f_fs, &f_ss, &intensity, &sigma,
-		                   ir_inn, ir_mid, ir_out, NULL, &saturated);
+		                   ir_inn, ir_mid, ir_out, &saturated);
 		if ( r ) {
 			n_int++;
 			continue;
@@ -727,7 +687,7 @@ void validate_peaks(struct image *image, double min_snr,
 		}
 
 		/* Check for a nearby feature */
-		image_feature_closest(flist, f_fs, f_ss, &d, &idx);
+		image_feature_closest(flist, f_fs, f_ss, &d, &idx, image->det);
 		if ( d < 2.0*ir_inn ) {
 			n_prx++;
 			continue;

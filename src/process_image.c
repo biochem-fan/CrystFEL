@@ -51,7 +51,7 @@
 
 
 void process_image(const struct index_args *iargs, struct pattern_args *pargs,
-                   Stream *st, int cookie, const char *tmpdir)
+                   Stream *st, int cookie, const char *tmpdir, int results_pipe)
 {
 	float *data_for_measurement;
 	size_t data_size;
@@ -118,6 +118,8 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		filter_noise(&image);
 	}
 
+	mark_resolution_range_as_bad(&image, iargs->highres, +INFINITY);
+
 	switch ( iargs->peaks ) {
 
 		case PEAK_HDF5:
@@ -166,28 +168,25 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	}
 
 	pargs->n_crystals = image.n_crystals;
+	for ( i=0; i<image.n_crystals; i++ ) {
+		crystal_set_image(image.crystals[i], &image);
+	}
 
-	/* Default beam parameters */
+	/* Default parameters */
 	image.div = image.beam->divergence;
 	image.bw = image.beam->bandwidth;
-
-	/* Integrate each crystal's diffraction spots */
 	for ( i=0; i<image.n_crystals; i++ ) {
-
-		/* Set default crystal parameter(s) */
 		crystal_set_profile_radius(image.crystals[i],
 		                           image.beam->profile_radius);
 		crystal_set_mosaicity(image.crystals[i], 0.0);  /* radians */
-		crystal_set_image(image.crystals[i], &image);
-
 	}
 
 	/* Integrate all the crystals at once - need all the crystals so that
 	 * overlaps can be detected. */
-	integrate_all_2(&image, iargs->int_meth, iargs->push_res,
+	integrate_all_4(&image, iargs->int_meth, PMODEL_SPHERE, iargs->push_res,
 	                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
 	                iargs->int_diag, iargs->int_diag_h,
-	                iargs->int_diag_k, iargs->int_diag_l);
+	                iargs->int_diag_k, iargs->int_diag_l, results_pipe);
 
 	write_chunk(st, &image, hdfile,
 	            iargs->stream_peaks, iargs->stream_refls);

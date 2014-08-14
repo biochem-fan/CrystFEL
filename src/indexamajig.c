@@ -130,6 +130,7 @@ static void show_help(const char *s)
 "                          Example: /data/data0.\n"
 "                          Default: The first one found.\n"
 "    --push-res=<n>      Integrate higher than apparent resolution cutoff.\n"
+"    --highres=<n>       Absolute resolution cutoff in Angstroms.\n"
 "\n"
 "\nFor time-resolved stuff, you might want to use:\n\n"
 "     --copy-hdf5-field <f>  Copy the value of field <f> into the stream. You\n"
@@ -197,6 +198,7 @@ int main(int argc, char *argv[])
 	char *int_str = NULL;
 	char *tempdir = NULL;
 	char *int_diag = NULL;
+	char *geom_filename = NULL;
 
 	/* Defaults */
 	iargs.cell = NULL;
@@ -237,6 +239,7 @@ int main(int argc, char *argv[])
 	iargs.ipriv = NULL;  /* No default */
 	iargs.int_meth = integration_method("rings-nocen", NULL);
 	iargs.push_res = 0.0;
+	iargs.highres = +INFINITY;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -291,6 +294,7 @@ int main(int argc, char *argv[])
 		{"push-res",           1, NULL,               19},
 		{"res-push",           1, NULL,               19}, /* compat */
 		{"peak-radius",        1, NULL,               20},
+		{"highres",            1, NULL,               21},
 
 		{0, 0, NULL, 0}
 	};
@@ -335,6 +339,7 @@ int main(int argc, char *argv[])
 			break;
 
 			case 'g' :
+			geom_filename = optarg;
 			iargs.det = get_detector_geometry(optarg);
 			if ( iargs.det == NULL ) {
 				ERROR("Failed to read detector geometry from "
@@ -438,6 +443,15 @@ int main(int argc, char *argv[])
 
 			case 20 :
 			pkrad = strdup(optarg);
+			break;
+
+			case 21 :
+			if ( sscanf(optarg, "%f", &iargs.highres) != 1 ) {
+				ERROR("Invalid value for --highres\n");
+				return 1;
+			}
+			/* A -> m^-1 */
+			iargs.highres = 1.0 / (iargs.highres/1e10);
 			break;
 
 			case 0 :
@@ -654,14 +668,12 @@ int main(int argc, char *argv[])
 
 	}
 
-	st = open_stream_for_write(outfile);
+	st = open_stream_for_write_2(outfile, geom_filename, argc, argv);
 	if ( st == NULL ) {
 		ERROR("Failed to open stream '%s'\n", outfile);
 		return 1;
 	}
 	free(outfile);
-
-	write_command(st, argc, argv);
 
 	/* Prepare the indexer */
 	if ( indm != NULL ) {
