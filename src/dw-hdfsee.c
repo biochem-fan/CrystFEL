@@ -1313,7 +1313,7 @@ static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 		gtk_widget_show(dw->statusbar);
 		vbox = gtk_bin_get_child(GTK_BIN(dw->window));
 		gtk_box_pack_end(GTK_BOX(vbox), dw->statusbar,
-		                 TRUE, TRUE, 0);
+		                 FALSE, FALSE, 0);
 		cc = gtk_statusbar_get_context_id(GTK_STATUSBAR(dw->statusbar),
 		                                  "calibmode");
 		gtk_statusbar_push(GTK_STATUSBAR(dw->statusbar), cc,
@@ -1413,6 +1413,7 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
 					struct imagefeature *feature = image_get_feature(dw->image->features, j);
 					if (feature == NULL) continue;
 					feature->rx = FEATURE_SPOT; // FIXME: reciprocal_x field is hijacked!
+					if (feature->name == NULL) feature->name = strdup("Spot");
 				}
 
 				for (j = 0; j < dw->image->n_crystals; j++) {
@@ -1431,8 +1432,8 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
 						get_indices(refl, &h, &k, &l);
 						get_detector_pos(refl, &fs, &ss);
 					
-						char name[32];
-						snprintf(name, 31, "%i %i %i", h, k, l);
+						char name[64];
+						snprintf(name, 63, "(%i, %i, %i) on lattice %d", h, k, l, j);
 
 						// FIXME: intensity field is hijacked!
 						image_add_feature(dw->image->features, fs, ss, dw->image, j + FEATURE_PREDICTION,
@@ -2278,6 +2279,16 @@ static void calibmode_press(DisplayWindow *dw, GdkEventButton *event)
                         "Last clicked position: x: %i, y: %i, fs: %u, ss: %u,"
                         " (panel %s)",
                         x, y, fs, ss, find_panel(dw->image->det, fs, ss)->name);
+		struct imagefeature *nearest_feature = NULL;
+		double dist = +HUGE_VAL, resolution = 0;
+		int idx = -1;
+		nearest_feature = image_feature_closest(dw->image->features,
+							fs, ss, &dist, &idx, dw->image->det);
+		struct rvec rvec = get_q(dw->image, fs, ss, NULL, 1.0 / dw->image->lambda);
+		resolution = 10E9 / sqrt(rvec.u * rvec.u + rvec.v * rvec.v + rvec.w * rvec.w);
+		if (dist < 10)
+			printf("%s at %fA\n", nearest_feature->name, resolution);
+
 	}
 	gtk_statusbar_push(GTK_STATUSBAR(dw->statusbar), cc, statusbar_string);
 }
