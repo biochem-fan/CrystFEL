@@ -97,7 +97,14 @@ ImageFeatureList *image_feature_list_new()
 
 void image_feature_list_free(ImageFeatureList *flist)
 {
+	int i;
 	if ( !flist ) return;
+	
+	for ( i=0; i<flist->n_features; i++ ) {
+		if (flist->features[i].name != NULL) {
+			free(flist->features[i].name);
+		}
+	}
 
 	if ( flist->features ) free(flist->features);
 	free(flist);
