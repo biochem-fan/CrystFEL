@@ -198,7 +198,8 @@ extern void image_reactivate_features(ImageFeatureList *flist);
 
 extern struct imagefeature *image_feature_closest(ImageFeatureList *flist,
                                                   double fs, double ss,
-                                                  double *d, int *idx);
+                                                  double *d, int *idx,
+                                                  struct detector *det);
 
 extern int image_feature_count(ImageFeatureList *flist);
 extern struct imagefeature *image_get_feature(ImageFeatureList *flist, int idx);

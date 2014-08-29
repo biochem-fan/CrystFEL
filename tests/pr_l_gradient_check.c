@@ -125,7 +125,7 @@ static double test_gradients(Crystal *cr, double incr_val, int refine,
 	int nref;
 	int n_good, n_invalid, n_small, n_nan, n_bad;
 	RefList *reflections;
-	FILE *fh;
+	FILE *fh = NULL;
 	int ntot = 0;
 	double total = 0.0;
 	char tmp[32];
@@ -337,7 +337,7 @@ int main(int argc, char *argv[])
 
 	rng = gsl_rng_alloc(gsl_rng_mt19937);
 
-	for ( i=0; i<2; i++ ) {
+	for ( i=0; i<3; i++ ) {
 
 		UnitCell *rot;
 		double val;
@@ -346,11 +346,17 @@ int main(int argc, char *argv[])
 		if ( i == 0 ) {
 			pmodel = PMODEL_SPHERE;
 			STATUS("Testing flat sphere model:\n");
-		} else {
+		} else if ( i == 1 ) {
 			pmodel = PMODEL_GAUSSIAN;
 			STATUS("Testing Gaussian model:\n");
+		} else if ( i == 2 ) {
+			pmodel = PMODEL_THIN;
+			STATUS("No need to test thin Ewald sphere model.\n");
+			continue;
+		} else {
+			ERROR("WTF?\n");
+			return 1;
 		}
-		/* No point testing TES model, because it has no Lorentz factor */
 
 		orientation = random_quaternion(rng);
 		rot = cell_rotate(cell, orientation);
