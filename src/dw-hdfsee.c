@@ -1280,15 +1280,36 @@ static gint displaywindow_set_usegeom(GtkWidget *d, DisplayWindow *dw)
 	return 0;
 }
 
+static void displaywindow_toggle_statusbar(DisplayWindow *dw, int val) {
+	GtkWidget *vbox, *w;
+	w =  gtk_ui_manager_get_widget(dw->ui,
+	                               "/ui/displaywindow/tools/statusbar");
+	gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(w), val);
+
+	if (val) {
+		if (dw->statusbar != NULL) return;
+		dw->statusbar = gtk_statusbar_new();
+		gtk_widget_show(dw->statusbar);
+		vbox = gtk_bin_get_child(GTK_BIN(dw->window));
+		gtk_box_pack_end(GTK_BOX(vbox), dw->statusbar,
+		                 FALSE, FALSE, 0);
+	} else {
+		if (dw->statusbar == NULL) return;
+		gtk_widget_destroy(dw->statusbar);
+		dw->statusbar = NULL;
+	}
+	displaywindow_update(dw);
+}
+
 static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 {
-	GtkWidget *w, *vbox;
+	GtkWidget *w;
 	int val;
 
 	w =  gtk_ui_manager_get_widget(dw->ui,
 	                               "/ui/displaywindow/tools/calibmode");
 	if ( !dw->use_geom ) {
-		gtk_check_menu_item_set_state(GTK_CHECK_MENU_ITEM(w), 0);
+		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(w), 0);
 		return 0;
 	}
 
@@ -1309,29 +1330,37 @@ static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 
 		dw->calib_mode = CALIBMODE_PANELS;
 
-		dw->statusbar = gtk_statusbar_new();
-		gtk_widget_show(dw->statusbar);
-		vbox = gtk_bin_get_child(GTK_BIN(dw->window));
-		gtk_box_pack_end(GTK_BOX(vbox), dw->statusbar,
-		                 FALSE, FALSE, 0);
+		displaywindow_toggle_statusbar(dw, 1);
 		cc = gtk_statusbar_get_context_id(GTK_STATUSBAR(dw->statusbar),
 		                                  "calibmode");
 		gtk_statusbar_push(GTK_STATUSBAR(dw->statusbar), cc,
 		                   "Calibration mode activated");
-		displaywindow_update(dw);
-
 	} else {
-
 		dw->calib_mode = CALIBMODE_NONE;
-		gtk_widget_destroy(dw->statusbar);
-		dw->statusbar = NULL;
-		displaywindow_update(dw);
-
+		displaywindow_toggle_statusbar(dw, 0);
 	}
-
+	displaywindow_update(dw);
 	return 0;
 }
 
+static gint displaywindow_set_statusbar(GtkWidget *d, DisplayWindow *dw)
+{
+	GtkWidget *w;
+	int val;
+	w =  gtk_ui_manager_get_widget(dw->ui,
+	                               "/ui/displaywindow/tools/statusbar");
+	// keep statusbar displayed during calibmode
+	if (dw->calib_mode != CALIBMODE_NONE) {
+		gtk_check_menu_item_set_state(GTK_CHECK_MENU_ITEM(w), 1);
+		return 0;
+	}
+
+	/* Get new state */
+	val = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(w));
+	displaywindow_toggle_statusbar(dw, val);
+
+	return 0;
+}
 
 static gint displaywindow_set_rings(GtkWidget *d, DisplayWindow *dw)
 {
@@ -1965,6 +1994,8 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 			G_CALLBACK(displaywindow_set_usegeom), FALSE },
 		{ "CalibModeAction", NULL, "Calibration Mode", NULL, NULL,
 			G_CALLBACK(displaywindow_set_calibmode), FALSE },
+		{ "StatusBarAction", NULL, "Status Bar", NULL, NULL,
+			G_CALLBACK(displaywindow_set_statusbar), FALSE },
 		{ "ColScaleAction", NULL, "Colour Scale", NULL, NULL,
 			G_CALLBACK(displaywindow_set_colscale), FALSE },
 		{ "RingsAction", NULL, "Resolution Rings", "F9", NULL,
