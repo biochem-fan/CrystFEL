@@ -2283,12 +2283,12 @@ static gint displaywindow_motion(GtkWidget *widget, GdkEventMotion *event,
 }
 
 
-static void calibmode_press(DisplayWindow *dw, GdkEventButton *event)
+static void update_statusbar(DisplayWindow *dw, GdkEventButton *event)
 {
 	int x,y;
 	double dfs, dss;
 	int fs, ss, revmap_return_value;
-	char statusbar_string[80];
+	char statusbar_string[80] = {};
 	guint cc;
 
 	cc = gtk_statusbar_get_context_id(GTK_STATUSBAR(dw->statusbar),
@@ -2298,27 +2298,33 @@ static void calibmode_press(DisplayWindow *dw, GdkEventButton *event)
 	y = dw->binning * (dw->height - 1 - event->y);
 	x += dw->min_x;
 	y += dw->min_x;
-	snprintf(statusbar_string, 80,
-	         "Last clicked position: x: %i, y: %i (Not in panel)", x, y);
-
 	revmap_return_value = reverse_2d_mapping(x, y, &dfs, &dss,
 	                                         dw->image->det);
 	if ( revmap_return_value == 0 ) {
 		fs = dfs;
 		ss = dss;
+		if (dw->calib_mode != CALIBMODE_NONE) {
+			snprintf(statusbar_string, 80,
+	                        "Last clicked position: x: %i, y: %i, fs: %u, ss: %u,"
+	                        " (panel %s)",
+	                        x, y, fs, ss, find_panel(dw->image->det, fs, ss)->name);
+		} else {
+			struct imagefeature *nearest_feature = NULL;
+			double dist = +HUGE_VAL, resolution = 0;
+			int idx = -1;
+			nearest_feature = image_feature_closest(dw->image->features,
+								fs, ss, &dist, &idx, dw->image->det);
+			struct rvec rvec = get_q(dw->image, fs, ss, NULL, 1.0 / dw->image->lambda);
+			resolution = 10E9 / sqrt(rvec.u * rvec.u + rvec.v * rvec.v + rvec.w * rvec.w);
+			if (dist < 10) {
+				snprintf(statusbar_string, 80, "%s at %.2f angstrom", nearest_feature->name, resolution);
+			} else {
+				snprintf(statusbar_string, 80, "Resolution %.2f angstrom", resolution);
+			}
+		}
+	} else {
 		snprintf(statusbar_string, 80,
-                        "Last clicked position: x: %i, y: %i, fs: %u, ss: %u,"
-                        " (panel %s)",
-                        x, y, fs, ss, find_panel(dw->image->det, fs, ss)->name);
-		struct imagefeature *nearest_feature = NULL;
-		double dist = +HUGE_VAL, resolution = 0;
-		int idx = -1;
-		nearest_feature = image_feature_closest(dw->image->features,
-							fs, ss, &dist, &idx, dw->image->det);
-		struct rvec rvec = get_q(dw->image, fs, ss, NULL, 1.0 / dw->image->lambda);
-		resolution = 10E9 / sqrt(rvec.u * rvec.u + rvec.v * rvec.v + rvec.w * rvec.w);
-		if (dist < 10)
-			printf("%s at %fA\n", nearest_feature->name, resolution);
+			"Last clicked position: x: %i, y: %i (Not in panel)", x, y);
 
 	}
 	gtk_statusbar_push(GTK_STATUSBAR(dw->statusbar), cc, statusbar_string);
@@ -2347,7 +2353,7 @@ static gint displaywindow_press(GtkWidget *widget, GdkEventButton *event,
 		}
 
 		if ( dw->statusbar != NULL ) {
-			calibmode_press(dw, event);
+			update_statusbar(dw, event);
 		}
 
 	}
