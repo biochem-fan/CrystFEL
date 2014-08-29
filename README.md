@@ -43,3 +43,15 @@ Should be stable enough.
 * Frame rejection based on CC
 * Output CC and scale factor from process_hkl to be plotted in R
 
+experimental branch
+-------------------
+
+Highly premature, experimental codes. Do **NOT** use this branch!
+
+* get_rms  
+  calculate RMS between observed spot positions and predicted positions.
+* export_to_pickle  
+  convert a stream file to pickle files cctbx.xfel can read.  
+  very buggy, not working well
+
+

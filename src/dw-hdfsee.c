@@ -627,7 +627,7 @@ static void displaywindow_update(DisplayWindow *dw)
 
 
 static gboolean displaywindow_expose(GtkWidget *da, GdkEventExpose *event,
-				     DisplayWindow *dw)
+                                     DisplayWindow *dw)
 {
 	cairo_t *cr;
 
@@ -1176,6 +1176,10 @@ static int load_geometry_file(DisplayWindow *dw, struct image *image,
 	gtk_widget_set_sensitive(GTK_WIDGET(w), TRUE);
 	gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(w), TRUE);
 	dw->use_geom = 1;
+
+	w = gtk_ui_manager_get_widget(dw->ui,
+				      "/ui/displaywindow/tools/calibmode");
+	gtk_widget_set_sensitive(GTK_WIDGET(w), TRUE);
 
 	return 0;
 }
@@ -2103,9 +2107,14 @@ static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh)
 		w = gtk_ui_manager_get_widget(nh->dw->ui,
 				      "/ui/displaywindow/view/usegeom");
 		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
+
 		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(w), FALSE);
 		nh->dw->use_geom = 0;
 		nh->dw->image->det = nh->dw->simple_geom;
+
+		w = gtk_ui_manager_get_widget(nh->dw->ui,
+					   "/ui/displaywindow/tools/calibmode");
+		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
 
 	}
 
@@ -2857,6 +2866,10 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 
 	if ( dw->use_geom ) {
 		dw->calib_mode = calibmode;
+	} else {
+		w = gtk_ui_manager_get_widget(dw->ui,
+		                           "/ui/displaywindow/tools/calibmode");
+		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
 	}
 
 	if ( dw->calib_mode ) {
