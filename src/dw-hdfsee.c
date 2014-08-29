@@ -497,6 +497,12 @@ static int draw_stuff(cairo_surface_t *surf, DisplayWindow *dw)
 				cairo_set_source_rgb(cr, 0.0, 1.0, 0.0); 
 			} else if (f->intensity == FEATURE_PREDICTION + 2) { // third lattice
 				cairo_set_source_rgb(cr, 0.0, 0.0, 1.0);
+			} else if (f->intensity == FEATURE_PREDICTION + 3) { // forth lattice
+				cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
+			} else if (f->intensity == FEATURE_PREDICTION + 4) { // fifth lattice
+				cairo_set_source_rgb(cr, 1.0, 0.0, 1.0);
+			} else if (f->intensity >= FEATURE_PREDICTION + 5) { // > sixth lattice
+				cairo_set_source_rgb(cr, 0.5, 1.0, 1.0);
 			} else {
 				switch ( dw->scale ) {
 					case SCALE_COLOUR :
