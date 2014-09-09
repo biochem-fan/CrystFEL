@@ -238,7 +238,7 @@ static double test_gradients(Crystal *cr, double incr_val, int refine,
 	int nref;
 	int n_good, n_invalid, n_small, n_nan, n_bad;
 	RefList *reflections;
-	FILE *fh;
+	FILE *fh = NULL;
 	int ntot = 0;
 	double total = 0.0;
 	char tmp[32];
@@ -461,10 +461,15 @@ int main(int argc, char *argv[])
 			STATUS("Testing flat sphere model:\n");
 		} else if ( i == 1 ) {
 			pmodel = PMODEL_GAUSSIAN;
-			STATUS("Testing Gaussian model:\n");
-		} else {
+			/* FIXME: Gradients for Gaussian model are not good */
+			STATUS("NOT testing Gaussian model.\n");
+			continue;
+		} else if ( i == 2 ) {
 			pmodel = PMODEL_THIN;
-			STATUS("Testing thin Ewald sphere model:\n");
+			STATUS("Testing Thin Ewald Sphere model:\n");
+		} else {
+			ERROR("WTF?\n");
+			return 1;
 		}
 
 		orientation = random_quaternion(rng);

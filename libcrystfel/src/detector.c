@@ -435,7 +435,7 @@ void record_image(struct image *image, int do_poisson, int background,
 }
 
 
-struct panel *find_panel(struct detector *det, double fs, double ss)
+signed int find_panel_number(struct detector *det, double fs, double ss)
 {
 	int p;
 
@@ -446,27 +446,18 @@ struct panel *find_panel(struct detector *det, double fs, double ss)
 		if ( (fs >= det->panels[p].min_fs)
 		  && (fs < det->panels[p].max_fs+1)
 		  && (ss >= det->panels[p].min_ss)
-		  && (ss < det->panels[p].max_ss+1) ) {
-			return &det->panels[p];
-		}
-	}
-
-	return NULL;
-}
-
-
-int find_panel_number(struct detector *det, int fs, int ss)
-{
-	int p;
-
-	for ( p=0; p<det->n_panels; p++ ) {
-		if ( (fs >= det->panels[p].min_fs)
-		  && (fs <= det->panels[p].max_fs)
-		  && (ss >= det->panels[p].min_ss)
-		  && (ss <= det->panels[p].max_ss) ) return p;
+		  && (ss < det->panels[p].max_ss+1) ) return p;
 	}
 
 	return -1;
+}
+
+
+struct panel *find_panel(struct detector *det, double fs, double ss)
+{
+	signed int pn = find_panel_number(det, fs, ss);
+	if ( pn == -1 ) return NULL;
+	return &det->panels[pn];
 }
 
 
@@ -1164,6 +1155,9 @@ struct detector *copy_geom(const struct detector *in)
 	out->bad = malloc(out->n_bad * sizeof(struct badregion));
 	memcpy(out->bad, in->bad, out->n_bad * sizeof(struct badregion));
 
+	out->n_rigid_groups = 0;
+	out->rigid_groups = NULL;
+
 	for ( i=0; i<out->n_panels; i++ ) {
 
 		struct panel *p;
@@ -1410,4 +1404,41 @@ int write_detector_geometry(const char *filename, struct detector *det)
 	fclose(fh);
 
 	return 0;
+}
+
+
+/**
+ * mark_resolution_range_as_bad()
+ * @image: An image structure
+ * @min: Minimum value of 1/d to be marked as bad
+ * @max: Maximum value of 1/d to be marked as bad
+ *
+ * Flags, in the bad pixel mask for @image, every pixel whose resolution is
+ * between @min and @max.
+ *
+ */
+
+void mark_resolution_range_as_bad(struct image *image,
+                                  double min, double max)
+{
+	int i;
+
+	for ( i=0; i<image->det->n_panels; i++ ) {
+
+		int fs, ss;
+		struct panel *p = &image->det->panels[i];
+
+		for ( ss=0; ss<p->h; ss++ ) {
+		for ( fs=0; fs<p->w; fs++ ) {
+			struct rvec q;
+			double r;
+			q = get_q_for_panel(p, fs, ss, NULL, 1.0/image->lambda);
+			r = modulus(q.u, q.v, q.w);
+			if ( (r >= min) && (r <= max) ) {
+				image->bad[i][fs+p->w*ss] = 1;
+			}
+		}
+		}
+
+	}
 }

@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <pty.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -44,10 +45,10 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#if HAVE_FORKPTY_LINUX
-#include <pty.h>
-#elif HAVE_FORKPTY_BSD
-#include <util.h>
+#ifdef HAVE_CLOCK_GETTIME
+#include <time.h>
+#else
+#include <sys/time.h>
 #endif
 
 #include "cell.h"

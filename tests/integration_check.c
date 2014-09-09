@@ -140,13 +140,14 @@ int main(int argc, char *argv[])
 		ic.ir_out = ir_out;
 		ic.meth = INTEGRATION_RINGS;
 		ic.int_diag = INTDIAG_NONE;
+		ic.masks = NULL;
 		if ( init_intcontext(&ic) ) {
 			ERROR("Failed to initialise integration.\n");
 			return 1;
 		}
 		setup_ring_masks(&ic, ir_inn, ir_mid, ir_out);
 
-		integrate_rings_once(refl, &image, &ic, cell);
+		integrate_rings_once(refl, &image, &ic, cell, 0);
 
 		cell_free(cell);
 
