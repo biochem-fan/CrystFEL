@@ -8,6 +8,7 @@
  *
  * Authors:
  *   2011-2014 Thomas White <taw@physics.org>
+ *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
  *
@@ -33,7 +34,7 @@
 #ifndef REFLIST_UTILS_H
 #define REFLIST_UTILS_H
 
-
+#include "image.h"
 #include "reflist.h"
 #include "cell.h"
 #include "symmetry.h"
@@ -50,8 +51,10 @@ extern void write_reflections_to_file(FILE *fh, RefList *list);
 extern int write_reflist(const char *filename, RefList *list);
 extern int write_reflist_2(const char *filename, RefList *list, SymOpList *sym);
 
+extern RefList *read_reflections_from_file2(FILE *fh, struct detector* det);
 extern RefList *read_reflections_from_file(FILE *fh);
 
+extern RefList *read_reflections2(const char *filename, struct detector* det);
 extern RefList *read_reflections(const char *filename);
 
 extern int check_list_symmetry(RefList *list, const SymOpList *sym);
