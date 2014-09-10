@@ -36,6 +36,7 @@ Seems stable but please carefully examine if it improves the result.
 * Multiple lattice indexing by calling external indexer(s) many times.
 * Sending prior-cell information to MOSFLM.  
   Prior-cell algorithm will be available in the next version of MOSFLM.
+* Hitrate calculator based on Poisson distribution in doc/hitrate.html
 
 scaling branch
 --------------
@@ -57,4 +58,7 @@ Highly premature, experimental codes. Do **NOT** use this branch!
   convert a stream file to pickle files cctbx.xfel can read.  
   very buggy, not working well
 
+multievent branch
+-----------------
 
+Testing multi-event HDF support in the upstream. hdfsee branch is merged here.
