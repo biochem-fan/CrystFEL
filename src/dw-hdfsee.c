@@ -492,17 +492,18 @@ static int draw_stuff(cairo_surface_t *surf, DisplayWindow *dw)
 
 			cairo_arc(cr, x/dw->binning, y/dw->binning,
 				  radius, 0.0, 2.0*M_PI);
-			if (f->intensity == FEATURE_PREDICTION + 0) { /* first lattice */
+			printf("%f\n", f->rx);
+			if (f->rx == FEATURE_PREDICTION + 0) { /* first lattice */
 				cairo_set_source_rgb(cr, 1.0, 0.0, 0.0);
-			} else if (f->intensity == FEATURE_PREDICTION + 1) { /* second lattice */
+			} else if (f->rx == FEATURE_PREDICTION + 1) { /* second lattice */
 				cairo_set_source_rgb(cr, 0.0, 1.0, 0.0); 
-			} else if (f->intensity == FEATURE_PREDICTION + 2) { /* third lattice */
+			} else if (f->rx == FEATURE_PREDICTION + 2) { /* third lattice */
 				cairo_set_source_rgb(cr, 0.0, 0.0, 1.0);
-			} else if (f->intensity == FEATURE_PREDICTION + 3) { /* forth lattice */
+			} else if (f->rx == FEATURE_PREDICTION + 3) { /* forth lattice */
 				cairo_set_source_rgb(cr, 0.0, 1.0, 1.0);
-			} else if (f->intensity == FEATURE_PREDICTION + 4) { /* fifth lattice */
+			} else if (f->rx == FEATURE_PREDICTION + 4) { /* fifth lattice */
 				cairo_set_source_rgb(cr, 1.0, 0.0, 1.0);
-			} else if (f->intensity >= FEATURE_PREDICTION + 5) { /* > sixth lattice */
+			} else if (f->rx >= FEATURE_PREDICTION + 5) { /* > sixth lattice */
 				cairo_set_source_rgb(cr, 0.5, 1.0, 1.0);
 			} else {
 				switch ( dw->scale ) {
@@ -1352,13 +1353,14 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
 		/* load spot list */
 		if (dw->stream != NULL && seek_stream(dw->stream, offset) == 0) {
 			int rval, j;
+			struct imagefeature *feature;
       
 			rval = read_chunk(dw->stream, dw->image);
 			if (rval) {
 				printf("Failed to load stream for image %s \n", dw->image->filename);
 			} else {
 				for (j = 0; j < dw->image->num_peaks; j++) {
-					struct imagefeature *feature = image_get_feature(dw->image->features, j);
+					feature = image_get_feature(dw->image->features, j);
 					if (feature == NULL) continue;
 					feature->rx = FEATURE_SPOT; /* FIXME: reciprocal_x field is hijacked! */
 					if (feature->name == NULL) feature->name = strdup("Spot");
@@ -1383,9 +1385,10 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
 						char name[64];
 						snprintf(name, 63, "(%i, %i, %i) on lattice %d", h, k, l, j);
 
-						/* FIXME: intensity field is hijacked! */
-						image_add_feature(dw->image->features, fs, ss, dw->image, j + FEATURE_PREDICTION,
-						strdup(name));
+						image_add_feature(dw->image->features, fs, ss, dw->image, 0, strdup(name));
+						feature = image_get_feature(dw->image->features, dw->image->num_peaks);
+						dw->image->num_peaks++; /* or, should we use a local variable? */
+						feature->rx = FEATURE_PREDICTION + j;
 					}			
 	  
 					reflist_free(crystal_get_reflections(cr));
