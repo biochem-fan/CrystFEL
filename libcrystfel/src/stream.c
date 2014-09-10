@@ -143,7 +143,7 @@ static int read_peaks_2_3(FILE *fh, struct image *image)
 
 			p = find_panel_by_name(image->det, pn);
 			if ( p == NULL ) {
-				ERROR("Panel not found: %s\n");
+				ERROR("Panel not found: %s\n", pn);
 				return 1;
 			}
 
@@ -903,6 +903,7 @@ static void read_crystal(Stream *st, struct image *image, StreamReadFlags srf)
 int read_chunk_2(Stream *st, struct image *image,  StreamReadFlags srf)
 {
 	char line[1024];
+	char *event_string;
 	char *rval = NULL;
 	int have_filename = 0;
 	int have_ev = 0;
@@ -934,12 +935,18 @@ int read_chunk_2(Stream *st, struct image *image,  StreamReadFlags srf)
 			have_filename = 1;
 		}
 
+		if ( strncmp(line, "Event: ", 7) == 0 ) {
+			event_string = strdup(line+7);
+			image->event = get_event_from_event_string(event_string);
+			free(event_string);
+		}
+
 		if ( strncmp(line, "indexed_by = ", 13) == 0 ) {
 			IndexingMethod *list;
 			list = build_indexer_list(line+13);
 			image->indexed_by = list[0];
 			free(list);
-			have_filename = 1;
+			have_filename = 1; /* FIXME: Shouldn't this be removed? */
 		}
 
 		if ( strncmp(line, "photon_energy_eV = ", 19) == 0 ) {
