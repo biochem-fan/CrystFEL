@@ -56,7 +56,7 @@
 #define FEATURE_PREDICTION 10000
 
 enum {
-  COLUMN_ID = 0,
+  COLUMN_EVENT = 0,
   COLUMN_FILENAME,
   COLUMN_SPOTS,
   COLUMN_CRYSTALS,
@@ -1419,11 +1419,11 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	GtkWidget *scwindow = gtk_scrolled_window_new(NULL, NULL);
 	GtkWidget *view = gtk_tree_view_new();
-	GtkListStore *data = gtk_list_store_new(5, G_TYPE_INT, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_LONG);
+	GtkListStore *data = gtk_list_store_new(5, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_LONG);
 	GtkTreeIter iter;
 	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
-	//GtkTreeViewColumn *col1 = gtk_tree_view_column_new_with_attributes ("Chunk ID",
-	//                                               renderer, "text", COLUMN_ID, NULL);
+	GtkTreeViewColumn *col1 = gtk_tree_view_column_new_with_attributes ("Event",
+	                                                 renderer, "text", COLUMN_EVENT, NULL);
 	GtkTreeViewColumn *col2 = gtk_tree_view_column_new_with_attributes ("File Name",
 	                                                 renderer, "text", COLUMN_FILENAME, NULL);
 	GtkTreeViewColumn *col3 = gtk_tree_view_column_new_with_attributes ("#Spots",
@@ -1431,8 +1431,8 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	GtkTreeViewColumn *col4 = gtk_tree_view_column_new_with_attributes ("#Crystals",
 	                                                 renderer, "text", COLUMN_CRYSTALS, NULL);
 
-	//gtk_tree_view_append_column(GTK_TREE_VIEW(view), col1);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col2);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col1);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col3);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col4);
 
@@ -1440,7 +1440,7 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	g_object_unref(data);
 	gtk_container_add(GTK_CONTAINER(scwindow), view);
 	gtk_container_add(GTK_CONTAINER(window), scwindow);
-	gtk_window_resize(GTK_WINDOW(window), 500, 1024);
+	gtk_window_resize(GTK_WINDOW(window), 600, 1024);
 	gtk_widget_show_all(window);
 	dw->streamwindow = window;
   
@@ -1468,8 +1468,12 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 			printf("Failed to load stream.\n");
 			break;
 		}
+		char *event_string = NULL;
+		if (image.event != NULL) {
+			get_event_string(image.event);
+		}
 		gtk_list_store_append(data, &iter);
-		gtk_list_store_set(data, &iter, COLUMN_ID, i, COLUMN_FILENAME, image.filename, 
+		gtk_list_store_set(data, &iter, COLUMN_EVENT, event_string, COLUMN_FILENAME, image.filename, 
 		                   COLUMN_SPOTS, image.num_peaks, COLUMN_CRYSTALS, image.n_crystals, 
 		                   COLUMN_OFFSET, stream_offset, -1);
     
@@ -1482,8 +1486,10 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 			crystal_free(cr);		  
 		}
 		stream_offset = ftell_stream(st);
-    
-		free(image.filename);
+    		if (image.event != NULL) {
+			free(image.filename);
+		}
+		free(event_string);
 		image_feature_list_free(image.features);
 		free(image.crystals);
 	}
