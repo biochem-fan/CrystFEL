@@ -492,7 +492,7 @@ static int draw_stuff(cairo_surface_t *surf, DisplayWindow *dw)
 
 			cairo_arc(cr, x/dw->binning, y/dw->binning,
 				  radius, 0.0, 2.0*M_PI);
-			printf("%f\n", f->rx);
+
 			if (f->rx == FEATURE_PREDICTION + 0) { /* first lattice */
 				cairo_set_source_rgb(cr, 1.0, 0.0, 0.0);
 			} else if (f->rx == FEATURE_PREDICTION + 1) { /* second lattice */
