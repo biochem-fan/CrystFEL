@@ -1434,6 +1434,10 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	GtkTreeViewColumn *col4 = gtk_tree_view_column_new_with_attributes ("#Crystals",
 	                                                 renderer, "text", COLUMN_CRYSTALS, NULL);
 
+	gtk_tree_view_column_set_resizable(col1, TRUE);
+	gtk_tree_view_column_set_resizable(col2, TRUE);
+	gtk_tree_view_column_set_resizable(col3, TRUE);
+	gtk_tree_view_column_set_resizable(col4, TRUE);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col2);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col1);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col3);
