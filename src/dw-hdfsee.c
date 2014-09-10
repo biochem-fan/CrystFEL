@@ -1403,6 +1403,30 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
 	}
 }
 
+/* Reference: http://scentric.net/tutorial/sec-sorting.html */
+gint stream_table_sort_func(GtkTreeModel *model, GtkTreeIter *a, GtkTreeIter *b, gpointer userdata) {
+	gint ret = 0;
+	switch (GPOINTER_TO_INT(userdata)) {
+	case COLUMN_SPOTS:
+	{
+		gint spota, spotb;
+		gtk_tree_model_get(model, a, COLUMN_SPOTS, &spota, -1);
+		gtk_tree_model_get(model, b, COLUMN_SPOTS, &spotb, -1);
+		ret = spota - spotb;
+		break;
+	}
+	case COLUMN_CRYSTALS:
+	{
+		guint64 crystala, crystalb;
+		gtk_tree_model_get(model, a, COLUMN_CRYSTALS, &crystala, -1);
+		gtk_tree_model_get(model, b, COLUMN_CRYSTALS, &crystalb, -1);
+		ret = crystala - crystalb;
+		break;
+	}
+	}
+	return ret;
+}
+
 static gint open_stream(const char *filename, DisplayWindow *dw) {
 	int i, j, rval;
 	Stream *st = open_stream_for_read(filename);
@@ -1423,25 +1447,33 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	GtkWidget *scwindow = gtk_scrolled_window_new(NULL, NULL);
 	GtkWidget *view = gtk_tree_view_new();
 	GtkListStore *data = gtk_list_store_new(5, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_LONG);
+	GtkTreeSortable *sortable = GTK_TREE_SORTABLE(data);
 	GtkTreeIter iter;
 	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
-	GtkTreeViewColumn *col1 = gtk_tree_view_column_new_with_attributes ("Event",
+	GtkTreeViewColumn *col_event = gtk_tree_view_column_new_with_attributes ("Event",
 	                                                 renderer, "text", COLUMN_EVENT, NULL);
-	GtkTreeViewColumn *col2 = gtk_tree_view_column_new_with_attributes ("File Name",
+	GtkTreeViewColumn *col_filename = gtk_tree_view_column_new_with_attributes ("File Name",
 	                                                 renderer, "text", COLUMN_FILENAME, NULL);
-	GtkTreeViewColumn *col3 = gtk_tree_view_column_new_with_attributes ("#Spots",
+	GtkTreeViewColumn *col_spots = gtk_tree_view_column_new_with_attributes ("#Spots",
 	                                                 renderer, "text", COLUMN_SPOTS, NULL);
-	GtkTreeViewColumn *col4 = gtk_tree_view_column_new_with_attributes ("#Crystals",
+	GtkTreeViewColumn *col_crystals = gtk_tree_view_column_new_with_attributes ("#Crystals",
 	                                                 renderer, "text", COLUMN_CRYSTALS, NULL);
 
-	gtk_tree_view_column_set_resizable(col1, TRUE);
-	gtk_tree_view_column_set_resizable(col2, TRUE);
-	gtk_tree_view_column_set_resizable(col3, TRUE);
-	gtk_tree_view_column_set_resizable(col4, TRUE);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col2);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col1);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col3);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col4);
+	gtk_tree_view_column_set_resizable(col_event, TRUE);
+	gtk_tree_view_column_set_resizable(col_filename, TRUE);
+	gtk_tree_view_column_set_resizable(col_spots, TRUE);
+	gtk_tree_view_column_set_resizable(col_crystals, TRUE);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_filename);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_event);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_spots);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_crystals);
+
+	gtk_tree_sortable_set_sort_func(sortable, COLUMN_SPOTS, stream_table_sort_func,
+ 	                                GINT_TO_POINTER(COLUMN_SPOTS), NULL);
+	gtk_tree_view_column_set_sort_column_id(col_spots, COLUMN_SPOTS);
+	gtk_tree_sortable_set_sort_func(sortable, COLUMN_CRYSTALS, stream_table_sort_func,
+ 	                                GINT_TO_POINTER(COLUMN_CRYSTALS), NULL);
+	gtk_tree_view_column_set_sort_column_id(col_crystals, COLUMN_CRYSTALS);
 
 	gtk_tree_view_set_model(GTK_TREE_VIEW(view), GTK_TREE_MODEL(data));
 	g_object_unref(data);
