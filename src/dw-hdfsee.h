@@ -40,6 +40,7 @@
 #include "events.h"
 #include "image.h"
 #include <gtk/gtk.h>
+#include "stream.h"
 
 typedef struct {
 	GtkWidget	*window;
@@ -81,6 +82,8 @@ typedef struct {
 	GtkWidget	*window;
 	GtkWidget	*drawingarea;
 	GtkWidget	*scrollarea;
+        GtkWidget       *streamwindow;
+	
 	GtkUIManager	*ui;
 	GtkActionGroup	*action_group;
 	int             n_pixbufs;
@@ -90,10 +93,11 @@ typedef struct {
 
 	int             not_ready_yet;
 
-    struct detector* simple_geom;
+	struct detector* simple_geom;
 
-    struct hdfile	*hdfile;
+	struct hdfile	*hdfile;
 	struct image	*image;
+        Stream *stream;
 
 	/* Dialog boxes */
 	BinningDialog  *binning_dialog;

@@ -2,6 +2,7 @@
 	<menubar name="displaywindow">
 
 		<menu name="file" action="FileAction">
+			<menuitem name="open" action="OpenAction" /> 
 			<menuitem name="save" action="SaveAction" />
 			<separator />
 			<menuitem name="close" action="CloseAction" />
@@ -25,6 +26,7 @@
 
 		<menu name="tools" action="ToolsAction">
 			<menuitem name="calibmode" action="CalibModeAction" />
+			<menuitem name="statusbar" action="StatusBarAction" />
 			<menuitem name="numbers" action="NumbersAction" />
 			<menuitem name="peaks" action="PeaksAction" />
 		</menu>

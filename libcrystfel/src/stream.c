@@ -1315,3 +1315,13 @@ int rewind_stream(Stream *st)
 {
 	return fseek(st->fh, 0, SEEK_SET);
 }
+
+long ftell_stream(Stream *st)
+{
+	return ftell(st->fh);
+}
+
+int seek_stream(Stream *st, long pos)
+{
+	return fseek(st->fh, pos, SEEK_SET);
+}
