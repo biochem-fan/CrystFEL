@@ -60,7 +60,9 @@ enum {
   COLUMN_FILENAME,
   COLUMN_SPOTS,
   COLUMN_CRYSTALS,
-  COLUMN_OFFSET
+  COLUMN_OFFSET,
+  COLUMN_ID,
+  COLUMN_RESOLUTION
 };
 
 struct newhdf {
@@ -1409,22 +1411,53 @@ gint stream_table_sort_func(GtkTreeModel *model, GtkTreeIter *a, GtkTreeIter *b,
 	switch (GPOINTER_TO_INT(userdata)) {
 	case COLUMN_SPOTS:
 	{
-		gint spota, spotb;
+		gint64 spota, spotb;
 		gtk_tree_model_get(model, a, COLUMN_SPOTS, &spota, -1);
 		gtk_tree_model_get(model, b, COLUMN_SPOTS, &spotb, -1);
-		ret = spota - spotb;
+		ret = (spota > spotb) ? 1 : -1;
 		break;
 	}
 	case COLUMN_CRYSTALS:
 	{
-		guint64 crystala, crystalb;
+		gint crystala, crystalb;
 		gtk_tree_model_get(model, a, COLUMN_CRYSTALS, &crystala, -1);
 		gtk_tree_model_get(model, b, COLUMN_CRYSTALS, &crystalb, -1);
-		ret = crystala - crystalb;
+		ret = (crystala > crystalb) ? 1 : -1;
+		break;
+	}
+	case COLUMN_RESOLUTION:
+	{
+		gdouble resoa, resob;
+		gint column_id;
+		GtkSortType order;
+		gtk_tree_model_get(model, a, COLUMN_RESOLUTION, &resoa, -1);
+		gtk_tree_model_get(model, b, COLUMN_RESOLUTION, &resob, -1);
+		gtk_tree_sortable_get_sort_column_id(GTK_TREE_SORTABLE(model),
+		                                     &column_id, &order);
+		if (resoa == INFINITY && resob != INFINITY) {
+		  ret = (order == GTK_SORT_ASCENDING) ? 1 : -1;
+		} else if (resob == INFINITY && resoa != INFINITY) {
+		  ret = (order == GTK_SORT_ASCENDING) ? -1 : 1;
+		} else if (resoa == INFINITY && resob == INFINITY) {
+			ret = 0;
+		} else {
+			ret = (resoa - resob > 0) ? 1 : -1;
+		}
 		break;
 	}
 	}
 	return ret;
+}
+
+void stream_table_resolution_data_func(GtkTreeViewColumn *col, GtkCellRenderer *renderer,
+                                       GtkTreeModel *model, GtkTreeIter *iter, gpointer userdata) {
+	gdouble resolution;
+	gchar buf[10] = {};
+	gtk_tree_model_get(model, iter, COLUMN_RESOLUTION, &resolution, -1);
+	if (resolution < INFINITY) {
+		g_snprintf(buf, sizeof(buf), "%.2f A", resolution);
+	}
+	g_object_set(renderer, "text", buf, NULL);
 }
 
 static gint open_stream(const char *filename, DisplayWindow *dw) {
@@ -1446,7 +1479,10 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	GtkWidget *scwindow = gtk_scrolled_window_new(NULL, NULL);
 	GtkWidget *view = gtk_tree_view_new();
-	GtkListStore *data = gtk_list_store_new(5, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_LONG);
+	GtkListStore *data = gtk_list_store_new(7, G_TYPE_STRING, G_TYPE_STRING,
+	                                           G_TYPE_INT64, G_TYPE_INT, 
+	                                           G_TYPE_LONG, G_TYPE_INT, 
+	                                           G_TYPE_DOUBLE);
 	GtkTreeSortable *sortable = GTK_TREE_SORTABLE(data);
 	GtkTreeIter iter;
 	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
@@ -1454,19 +1490,24 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	                                                 renderer, "text", COLUMN_EVENT, NULL);
 	GtkTreeViewColumn *col_filename = gtk_tree_view_column_new_with_attributes ("File Name",
 	                                                 renderer, "text", COLUMN_FILENAME, NULL);
-	GtkTreeViewColumn *col_spots = gtk_tree_view_column_new_with_attributes ("#Spots",
+	GtkTreeViewColumn *col_spots = gtk_tree_view_column_new_with_attributes ("Spot",
 	                                                 renderer, "text", COLUMN_SPOTS, NULL);
-	GtkTreeViewColumn *col_crystals = gtk_tree_view_column_new_with_attributes ("#Crystals",
+	GtkTreeViewColumn *col_crystals = gtk_tree_view_column_new_with_attributes ("Cell",
 	                                                 renderer, "text", COLUMN_CRYSTALS, NULL);
-
+	GtkTreeViewColumn *col_resolution = gtk_tree_view_column_new_with_attributes ("Reso",
+	                                                 renderer, "text", COLUMN_RESOLUTION, NULL);
+	gtk_tree_view_column_set_cell_data_func(col_resolution, renderer,
+	                                        stream_table_resolution_data_func, NULL, NULL);
 	gtk_tree_view_column_set_resizable(col_event, TRUE);
 	gtk_tree_view_column_set_resizable(col_filename, TRUE);
 	gtk_tree_view_column_set_resizable(col_spots, TRUE);
 	gtk_tree_view_column_set_resizable(col_crystals, TRUE);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_filename);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_event);
+	gtk_tree_view_column_set_resizable(col_resolution, TRUE);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_spots);
 	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_crystals);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_resolution);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_filename);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(view), col_event);
 
 	gtk_tree_sortable_set_sort_func(sortable, COLUMN_SPOTS, stream_table_sort_func,
  	                                GINT_TO_POINTER(COLUMN_SPOTS), NULL);
@@ -1474,6 +1515,9 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	gtk_tree_sortable_set_sort_func(sortable, COLUMN_CRYSTALS, stream_table_sort_func,
  	                                GINT_TO_POINTER(COLUMN_CRYSTALS), NULL);
 	gtk_tree_view_column_set_sort_column_id(col_crystals, COLUMN_CRYSTALS);
+	gtk_tree_sortable_set_sort_func(sortable, COLUMN_RESOLUTION, stream_table_sort_func,
+ 	                                GINT_TO_POINTER(COLUMN_RESOLUTION), NULL);
+	gtk_tree_view_column_set_sort_column_id(col_resolution, COLUMN_RESOLUTION);
 
 	gtk_tree_view_set_model(GTK_TREE_VIEW(view), GTK_TREE_MODEL(data));
 	g_object_unref(data);
@@ -1512,18 +1556,26 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 			get_event_string(image.event);
 		}
 		gtk_list_store_append(data, &iter);
-		gtk_list_store_set(data, &iter, COLUMN_EVENT, event_string, COLUMN_FILENAME, image.filename, 
-		                   COLUMN_SPOTS, image.num_peaks, COLUMN_CRYSTALS, image.n_crystals, 
-		                   COLUMN_OFFSET, stream_offset, -1);
-    
-		//  free_all_crystals(&image); // I don't know why but this doesn't work
+
+		double resolution = INFINITY;
 		for (j = 0; j<image.n_crystals; j++ ) {
 			Crystal *cr = image.crystals[j];
-			
+			double this_res = 1e10 / crystal_get_resolution_limit(cr);
+			if (resolution > this_res) {
+				resolution = this_res;
+			}
 			reflist_free(crystal_get_reflections(cr));
 			cell_free(crystal_get_cell(cr));
 			crystal_free(cr);		  
 		}
+		gtk_list_store_set(data, &iter, COLUMN_EVENT, event_string, 
+		                                COLUMN_FILENAME, image.filename, 
+		                                COLUMN_SPOTS, image.num_peaks, 
+		                                COLUMN_CRYSTALS, image.n_crystals, 
+		                                COLUMN_OFFSET, stream_offset, 
+		                                COLUMN_ID, i, 
+		                                COLUMN_RESOLUTION, resolution,
+		                                -1);
 		stream_offset = ftell_stream(st);
     		if (image.event != NULL) {
 			free(image.filename);
