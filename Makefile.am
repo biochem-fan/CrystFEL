@@ -13,7 +13,8 @@ noinst_PROGRAMS = tests/list_check tests/integration_check \
                   tests/cell_check tests/pr_l_gradient_check \
                   tests/pr_pl_gradient_check tests/ring_check \
                   tests/prof2d_check tests/ambi_check \
-                  scripts/get_rms scripts/export_to_pickle
+                  scripts/get_rms scripts/export_to_pickle \
+                  scripts/dump_unmerged 
 
 MERGE_CHECKS = tests/first_merge_check tests/second_merge_check \
                tests/third_merge_check tests/fourth_merge_check
@@ -135,6 +136,8 @@ tests_cell_check_SOURCES = tests/cell_check.c
 scripts_get_rms_SOURCES =  scripts/get_rms.c
 
 scripts_export_to_pickle_SOURCES =  scripts/export_to_pickle.c
+
+scripts_dump_unmerged_SOURCES =  scripts/dump_unmerged.c
 
 INCLUDES = -I$(top_srcdir)/libcrystfel/src -I$(top_srcdir)/data
 
