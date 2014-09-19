@@ -34,9 +34,9 @@ multievent branch
 Testing multi-event HDF support in the upstream. hdfsee branch was merged here.
 
 * More updates in the stream viewer (hdfsee)
-** Resizable columns
-** Sortable rows
-** Support multi-event HDF files (underway)
+    * Resizable columns
+    * Sortable rows
+    * Support multi-event HDF files (underway)
 
 multiple-lattice branch
 -----------------------
@@ -66,4 +66,7 @@ Highly premature, experimental codes. Do **NOT** use this branch!
   calculate RMS between observed spot positions and predicted positions.
 * export_to_pickle  
   convert a stream file to pickle files cctbx.xfel can read.  
-  very buggy, not working well
+  very buggy, not working well.
+* dump_unmerged  
+  dump unmerged (but indices converted to be in the ASU) intensities from 
+  a stream file for statistical inspection.
