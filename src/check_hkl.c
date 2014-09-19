@@ -444,7 +444,7 @@ static void plot_shells(RefList *list, UnitCell *cell, const SymOpList *sym,
 
 	fh = fopen(shell_file, "w");
 	if ( fh == NULL ) {
-	  ERROR("Couldn't open '%s'\n", shell_file);
+		ERROR("Couldn't open '%s'\n", shell_file);
 		return;
 	}
 

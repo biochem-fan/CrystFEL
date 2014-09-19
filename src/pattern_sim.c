@@ -9,6 +9,7 @@
  * Authors:
  *   2009-2014 Thomas White <taw@physics.org>
  *   2013-2014 Chun Hong Yoon <chun.hong.yoon@desy.de>
+ *   2014      Valerio Mariani
  *   2013      Alexandra Tolstikova
  *
  * This file is part of CrystFEL.
@@ -99,22 +100,27 @@ static void show_help(const char *s)
 }
 
 
-static double *intensities_from_list(RefList *list)
+static double *intensities_from_list(RefList *list, SymOpList *sym)
 {
 	Reflection *refl;
 	RefListIterator *iter;
 	double *out = new_arr_intensity();
+	SymOpMask *m = new_symopmask(sym);
+	int neq = num_equivs(sym, NULL);
 
 	for ( refl = first_refl(list, &iter);
 	      refl != NULL;
 	      refl = next_refl(refl, iter) ) {
 
 		signed int h, k, l;
+		int eps;
 		double intensity = get_intensity(refl);
 
 		get_indices(refl, &h, &k, &l);
+		special_position(sym, m, h, k, l);
+		eps = neq / num_equivs(sym, m);
 
-		set_arr_intensity(out, h, k, l, intensity);
+		set_arr_intensity(out, h, k, l, intensity / eps);
 
 	}
 
@@ -220,7 +226,8 @@ int main(int argc, char *argv[])
 	int c;
 	struct image image;
 	struct gpu_context *gctx = NULL;
-	double *powder;
+	struct image *powder;
+	float *powder_data;
 	char *intfile = NULL;
 	double *intensities;
 	char *rval;
@@ -469,6 +476,12 @@ int main(int argc, char *argv[])
 		ERROR("You need to specify a geometry file with --geometry\n");
 		return 1;
 	}
+	image.det = get_detector_geometry(geometry);
+	if ( image.det == NULL ) {
+		ERROR("Failed to read detector geometry from '%s'\n", geometry);
+		return 1;
+	}
+	free(geometry);
 
 	if ( beamfile == NULL ) {
 		ERROR("You need to specify a beam parameter file"
@@ -509,7 +522,7 @@ int main(int argc, char *argv[])
 
 		RefList *reflections;
 
-		reflections = read_reflections(intfile);
+		reflections = read_reflections2(intfile, image.det);
 		if ( reflections == NULL ) {
 			ERROR("Problem reading input file %s\n", intfile);
 			return 1;
@@ -521,7 +534,7 @@ int main(int argc, char *argv[])
 		} else {
 			phases = NULL;
 		}
-		intensities = intensities_from_list(reflections);
+		intensities = intensities_from_list(reflections, sym);
 		phases = phases_from_list(reflections);
 		flags = flags_from_list(reflections);
 
@@ -535,13 +548,6 @@ int main(int argc, char *argv[])
 		reflist_free(reflections);
 
 	}
-
-	image.det = get_detector_geometry(geometry);
-	if ( image.det == NULL ) {
-		ERROR("Failed to read detector geometry from '%s'\n", geometry);
-		return 1;
-	}
-	free(geometry);
 
 	image.beam = get_beam_parameters(beamfile);
 	if ( image.beam == NULL ) {
@@ -586,7 +592,12 @@ int main(int argc, char *argv[])
 		gsl_rng_set(rng, seed);
 	}
 
-	powder = calloc(image.width*image.height, sizeof(*powder));
+	powder = calloc(1, sizeof(struct image));
+	powder->width = image.width;
+	powder->height = image.height;
+	powder->det = image.det;
+	powder_data = calloc(image.width*image.height, sizeof(float));
+	powder->data = powder_data;
 
 	/* Splurge a few useful numbers */
 	STATUS("Wavelength is %f nm\n", image.lambda/1.0e-9);
@@ -725,14 +736,12 @@ int main(int argc, char *argv[])
 
 			for ( x=0; x<image.width; x++ ) {
 			for ( y=0; y<image.height; y++ ) {
-				powder[x+w*y] += (double)image.data[x+w*y];
+				powder->data[x+w*y] += (double)image.data[x+w*y];
 			}
 			}
 
 			if ( !(ndone % 10) ) {
-				hdf5_write(powder_fn, powder,
-				           image.width, image.height,
-				           H5T_NATIVE_DOUBLE);
+				hdf5_write_image(powder_fn, powder, NULL);
 			}
 		}
 
@@ -749,8 +758,8 @@ int main(int argc, char *argv[])
 
 			number++;
 
-			/* Write the output file */
-			hdf5_write_image(filename, &image);
+            /* Write the output file */
+			hdf5_write_image(filename, &image, NULL);
 
 		}
 
@@ -768,9 +777,7 @@ skip:
 	} while ( !done );
 
 	if ( powder_fn != NULL ) {
-		hdf5_write(powder_fn, powder,
-		           image.width, image.height,
-		           H5T_NATIVE_DOUBLE);
+		hdf5_write_image(powder_fn, powder, NULL);
 	}
 
 	if ( gctx != NULL ) {
@@ -780,6 +787,7 @@ skip:
 	free(image.det->panels);
 	free(image.det);
 	free(image.beam);
+	free(powder->data);
 	free(powder);
 	cell_free(input_cell);
 	free(intensities);

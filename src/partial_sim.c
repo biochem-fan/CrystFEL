@@ -8,6 +8,7 @@
  *
  * Authors:
  *   2011-2014 Thomas White <taw@physics.org>
+ *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
  *
@@ -204,7 +205,7 @@ static void draw_and_write_image(struct image *image, RefList *reflections,
 		image->data[i] += poisson_noise(rng, background);
 	}
 
-	hdf5_write_image(image->filename, image);
+	hdf5_write_image(image->filename, image, NULL);
 	free(image->data);
 }
 
@@ -386,7 +387,7 @@ static void finalise_job(void *vqargs, void *vwargs)
 	struct queue_args *qargs = vqargs;
 	int i;
 
-	write_chunk(qargs->stream, &wargs->image, NULL, 0, 1);
+	write_chunk(qargs->stream, &wargs->image, NULL, 0, 1, NULL);
 
 	for ( i=0; i<NBINS; i++ ) {
 		qargs->n_ref[i] += wargs->n_ref[i];
@@ -711,6 +712,7 @@ int main(int argc, char *argv[])
 	image.num_peaks = 0;
 	image.num_saturated_peaks = 0;
 	image.spectrum_size = 0;
+	image.event = NULL;
 
 	if ( random_intensities ) {
 		full = reflist_new();

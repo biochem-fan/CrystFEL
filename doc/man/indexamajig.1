@@ -243,7 +243,7 @@ When using \fB--peaks=hdf5\fR, read the peak locations from a table in the HDF5 
 .PD 0
 .IP \fB--tolerance=\fR\fItol\fR
 .PD
-Set the tolerances for unit cell comparison.  \fItol\fR takes the form \fIa\fR,\fIb\fR,\fIc\fR,\fIang\fR.  \fIa\fR, \fIb\fR and \fIc\fR are the tolerances, in percent, for the respective direct space axes when using \fB-axes\fR in the indexing method (see below).  \fIang\fR is the tolerance in degrees for the angles.  When \fBnot\fR using \fB-axes\fR, they represent the respective \fIreciprocal\fR space parameters.  Sorry for the horrifying inconsistency.
+Set the tolerances for unit cell comparison.  \fItol\fR takes the form \fIa\fR,\fIb\fR,\fIc\fR,\fIang\fR.  \fIa\fR, \fIb\fR and \fIc\fR are the tolerances, in percent, for the respective \fIreciprocal\fR space axes, and \fIang\fR is the tolerance in degrees for the reciprocal space angles.  If the unit cell is centered, the tolerances are applied to the corresponding primitive unit cell.
 .PD
 The default is \fB--tolerance=5,5,5,1.5\fR.
 
@@ -321,7 +321,7 @@ Do not record integrated reflections in the stream.  The resulting output won't 
 .PD 0
 .IP \fB--int-diag=\fIcondition\fR
 .PD
-Show detailed information about reflection integration when \fIcondition\fR is met.  The \fIcondition\fR can be \fBall\fR, \fBnone\fR, a set of Miller indices separated by commas, \fBrandom\fR, \fBimplausible\fR or \fBnegative\fR.  \fBrandom\fR means to show information about a random 1% of the peaks.  \fBnegative\fR means to show peaks with intensities which are negative by more than 3 sigma.  \fBimplausible\fR means to show peaks with intensities which are negative by more than 5 sigma.  The default is \fB--int-diag=none\fR.
+Show detailed information about reflection integration when \fIcondition\fR is met.  The \fIcondition\fR can be \fBall\fR, \fBnone\fR, a set of Miller indices separated by commas, \fBrandom\fR, \fBimplausible\fR or \fBnegative\fR.  \fBrandom\fR means to show information about a random 1% of the peaks.  \fBnegative\fR means to show peaks with intensities which are negative by more than 3 sigma.  \fBimplausible\fR means to show peaks with intensities which are negative by more than 5 sigma.  \fBstrong\fR means to show peaks with intensities which are positive by more than 3 sigma  The default is \fB--int-diag=none\fR.
 
 .PD 0
 .IP \fB--push-res=\fIn\fR

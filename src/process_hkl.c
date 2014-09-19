@@ -85,7 +85,6 @@ static void show_help(const char *s)
 "      --min-snr=<n>         Require individual intensity measurements to\n"
 "                             have I > n * sigma(I).  Default: -infinity.\n"
 "      --min-cc=<n>          Reject frames with CC less than n. Default: infinity.\n"
-"                             have I > n * sigma(I).  Default: -infinity.\n"
 "      --max-adu=<n>         Maximum peak value.  Default: infinity.\n"
 "      --min-res=<n>         Merge only crystals which diffract above <n> A.\n"
 "      --push-res=<n>        Integrate higher than apparent resolution cutoff.\n"
@@ -183,9 +182,9 @@ static double scale_intensities(RefList *reference, RefList *new,
 }
 
 static double cc_intensities(RefList *reference, RefList *new,
-                              const SymOpList *sym)
+                             const SymOpList *sym)
 {
-  // x is reference
+	/* "x" is "reference" */
 	float s_xy = 0.0;
 	float s_x = 0.0;
 	float s_y = 0.0;
@@ -234,6 +233,7 @@ static double cc_intensities(RefList *reference, RefList *new,
 	return (s_xy - s_x*s_y/n) / sqrt(t1*t2);
 }
 
+
 static double *check_hist_size(int n, double *hist_vals)
 {
 	int ns;
@@ -257,32 +257,38 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
                          double **hist_vals, signed int hist_h,
                          signed int hist_k, signed int hist_l, int *hist_n,
                          int config_nopolar, double min_snr, double max_adu,
-                         double push_res, double min_cc, int do_scale, FILE *stat)
+                         double push_res, double min_cc, int do_scale,
+                         FILE *stat)
 {
 	Reflection *refl;
 	RefListIterator *iter;
+	RefList *new_refl;
 	double scale, cc;
+
+	new_refl = crystal_get_reflections(cr);
 
 	/* First, correct for polarisation */
 	if ( !config_nopolar ) {
-		polarisation_correction(crystal_get_reflections(cr),
-		                        crystal_get_cell(cr), image);
+		polarisation_correction(new_refl, crystal_get_cell(cr), image);
 	}
 
 	if ( reference != NULL ) {
-		scale = scale_intensities(reference,
-		                          crystal_get_reflections(cr), sym);
-		cc = cc_intensities(reference, crystal_get_reflections(cr), sym);
-		if (stat != NULL) {
-			fprintf(stat, "%s,%f,%f\n",image->filename, scale, cc);
+		if ( do_scale ) {
+			scale = scale_intensities(reference, new_refl, sym);
+		} else {
+			scale = 1.0;
 		}
-		if (cc < min_cc || scale <= 0) return 1;
+		cc = cc_intensities(reference, new_refl, sym);
+		if ( cc < min_cc ) return 1;
+		if ( isnan(scale) ) return 1;
+		if ( scale <= 0.0 ) return 1;
+		if ( stat != NULL ) {
+			fprintf(stat, "%s %f %f\n", image->filename, scale, cc);
+		}
+
 	} else {
 		scale = 1.0;
 	}
-	if (!do_scale) scale = 1.0;
-
-	if ( isnan(scale) ) return 1;
 
 	for ( refl = first_refl(crystal_get_reflections(cr), &iter);
 	      refl != NULL;
@@ -337,7 +343,6 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
 		if ( *hist_vals != NULL ) {
 
 			if ( (h==hist_h) && (k==hist_k) && (l==hist_l) ) {
-
 				*hist_vals = check_hist_size(*hist_n,
 							     *hist_vals);
 
@@ -391,11 +396,12 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 	int n_crystals_seen = 0;
 	FILE *stat = NULL;
 
-	if (stat_output != NULL) {
-	  stat = fopen(stat_output, "w");
-	  if (stat == NULL) {
-	    ERROR("Failed to open statistics output file %s\n", stat_output);
-	  }
+	if ( stat_output != NULL ) {
+		stat = fopen(stat_output, "w");
+		if ( stat == NULL ) {
+			ERROR("Failed to open statistics output file %s\n",
+			      stat_output);
+		}
 	}
 
 	do {
@@ -406,7 +412,8 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 		image.det = NULL;
 
 		/* Get data from next chunk */
-		rval = read_chunk(st, &image);
+		rval = read_chunk_2(st, &image, STREAM_READ_REFLECTIONS |
+		                    STREAM_READ_UNITCELL);
 		if ( rval ) break;
 
 		n_images++;
@@ -466,8 +473,9 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 		set_esd_intensity(refl, sqrt(var)/sqrt(red));
 	}
 
-	if (stat != NULL)
-	  fclose(stat);
+	if ( stat != NULL ) {
+		fclose(stat);
+	}
 
 	return 0;
 }
@@ -503,7 +511,7 @@ int main(int argc, char *argv[])
 	double min_res = 0.0;
 	double push_res = +INFINITY;
 	double min_cc = -INFINITY;
-	int do_scale = 0;
+	int twopass = 0;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -512,7 +520,7 @@ int main(int argc, char *argv[])
 		{"output",             1, NULL,               'o'},
 		{"start-after",        1, NULL,               's'},
 		{"stop-after",         1, NULL,               'f'},
-		{"scale",              0, &do_scale,           1},
+		{"scale",              0, &config_scale,       1},
 		{"no-polarisation",    0, &config_nopolar,     1},
 		{"no-polarization",    0, &config_nopolar,     1},
 		{"symmetry",           1, NULL,               'y'},
@@ -546,10 +554,6 @@ int main(int argc, char *argv[])
 
 			case 'o' :
 			output = strdup(optarg);
-			break;
-
-			case 9 :
-			stat_output = strdup(optarg);
 			break;
 
 			case 's' :
@@ -648,7 +652,12 @@ int main(int argc, char *argv[])
 				ERROR("Invalid value for --min-cc.\n");
 				return 1;
 			}
-			config_scale = 1;
+			twopass = 1;
+			break;
+
+			case 9 :
+			stat_output = strdup(optarg);
+			twopass = 1;
 			break;
 
 			case 0 :
@@ -661,8 +670,6 @@ int main(int argc, char *argv[])
 		}
 
 	}
-
-	if (do_scale) config_scale = 1;
 
 	if ( filename == NULL ) {
 		ERROR("Please specify filename using the -i option\n");
@@ -728,17 +735,21 @@ int main(int argc, char *argv[])
 
 	}
 
+	/* Need to do a second pass if we are scaling */
+	if ( config_scale ) twopass = 1;
+
 	hist_i = 0;
 	r = merge_all(st, model, NULL, sym, &hist_vals, hist_h, hist_k, hist_l,
 	              &hist_i, config_nopolar, min_measurements, min_snr,
-	              max_adu, start_after, stop_after, min_res, push_res, min_cc, do_scale, stat_output);
+	              max_adu, start_after, stop_after, min_res, push_res,
+	              min_cc, config_scale, stat_output);
 	fprintf(stderr, "\n");
 	if ( r ) {
 		ERROR("Error while reading stream.\n");
 		return 1;
 	}
 
-	if ( config_scale ) {
+	if ( twopass ) {
 
 		RefList *reference;
 
@@ -751,20 +762,23 @@ int main(int argc, char *argv[])
 
 			int r;
 
-			STATUS("Extra pass for scaling...\n");
+			STATUS("Second pass for scaling and/or CCs...\n");
 
 			reference = model;
 			model = reflist_new();
 
-			free(hist_vals);
-			hist_vals = malloc(1*sizeof(double));
-			hist_i = 0;
+			if ( hist_vals != NULL ) {
+				free(hist_vals);
+				hist_vals = malloc(1*sizeof(double));
+				hist_i = 0;
+			}
 
-			r = merge_all(st, model, reference, sym,
-				     &hist_vals, hist_h, hist_k, hist_l, &hist_i,
-				     config_nopolar, min_measurements, min_snr,
-				     max_adu, start_after, stop_after, min_res,
-				     push_res, min_cc, do_scale, stat_output);
+			r = merge_all(st, model, reference, sym, &hist_vals,
+			              hist_h, hist_k, hist_l, &hist_i,
+				      config_nopolar, min_measurements, min_snr,
+				      max_adu, start_after, stop_after, min_res,
+				      push_res, min_cc, config_scale,
+				      stat_output);
 			fprintf(stderr, "\n");
 			if ( r ) {
 				ERROR("Error while reading stream.\n");
@@ -796,8 +810,7 @@ int main(int argc, char *argv[])
 	reflist_free(model);
 	free(output);
 	free(filename);
-	if (stat_output != NULL)
-	  free(stat_output);
+	free(stat_output);
 
 	return 0;
 }
