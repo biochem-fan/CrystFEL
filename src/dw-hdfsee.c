@@ -1544,6 +1544,7 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 
 		struct image image;
 		image.det = NULL;
+		image.event = NULL;
     
 		/* Get data from next chunk */
 		rval = read_chunk(st, &image);
@@ -2846,7 +2847,6 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 	// Surprisingly, hdfile_open succeeds with a stream file and ends up with SEGV!
 	// Thus, we must test stream first
 	if (open_stream(filename, dw) != 0) {
-
 		dw->hdfile = hdfile_open(filename);
 		if ( dw->hdfile == NULL ) {
 			ERROR("Couldn't open file: %s\n", filename);
