@@ -80,7 +80,6 @@ max_intensity
 UnitCell
 LatticeType
 UnitCellTransformation
-rvec
 <SUBSECTION>
 cell_new
 cell_new_from_cell
@@ -91,18 +90,13 @@ cell_free
 <SUBSECTION>
 cell_get_cartesian
 cell_get_parameters
-cell_get_pointgroup
 cell_get_reciprocal
 cell_get_centering
 cell_get_lattice_type
 cell_get_unique_axis
 <SUBSECTION>
 cell_set_cartesian
-cell_set_cartesian_a
-cell_set_cartesian_b
-cell_set_cartesian_c
 cell_set_parameters
-cell_set_pointgroup
 cell_set_reciprocal
 cell_set_centering
 cell_set_lattice_type
@@ -173,6 +167,9 @@ ph_lambda_to_eV
 random_flat
 flat_noise
 show_matrix
+likely
+unlikely
+UNUSED
 </SECTION>
 
 <SECTION>
@@ -299,6 +296,7 @@ free_symopmask
 describe_symmetry
 symmetry_name
 set_symmetry_name
+get_matrix_name
 is_centrosymmetric
 is_centric
 </SECTION>
@@ -347,14 +345,34 @@ twod_mapping
 reverse_2d_mapping
 largest_q
 in_bad_region
+mark_resolution_range_as_bad
 </SECTION>
 
 <SECTION>
-<FILE>beam-params</FILE>
-beam_params
-get_beam_parameters
-fill_in_beam_parameters
-free_beam_parameters
+<FILE>events</FILE>
+initialize_event
+push_path_entry_to_event
+pop_path_entry_from_event
+push_dim_entry_to_event
+pop_dim_entry_from_event
+copy_event
+free_event
+get_event_string
+get_event_from_event_string
+event_path_placeholder_subst
+partial_event_substitution
+retrieve_full_path
+initialize_filename_plus_event
+free_filename_plus_event
+initialize_event_list
+append_event_to_event_list
+add_non_existing_event_to_event_list
+copy_event_list
+free_event_list
+initialize_dim_structure
+default_dim_structure
+set_dim_structure_entry
+free_dim_structure_entry
 </SECTION>
 
 <SECTION>
@@ -426,7 +444,6 @@ LORENTZ_SCALE
 <FILE>peaks</FILE>
 peak_sanity_check
 search_peaks
-integrate_peak
 make_BgMask
 validate_peaks
 </SECTION>
@@ -453,6 +470,7 @@ IntDiag
 integrate_all
 integrate_all_2
 integrate_all_3
+integrate_all_4
 integration_method
 </SECTION>
 
@@ -468,9 +486,12 @@ PEAK_LIST_END_MARKER
 PEAK_LIST_START_MARKER
 REFLECTION_END_MARKER
 REFLECTION_START_MARKER
+GEOM_END_MARKER
+GEOM_START_MARKER
 open_stream_fd_for_write
 open_stream_for_read
 open_stream_for_write
+open_stream_for_write_2
 get_stream_fd
 close_stream
 read_chunk
@@ -479,4 +500,5 @@ write_chunk
 rewind_stream
 is_stream
 write_command
+write_geometry_file
 </SECTION>

@@ -10,6 +10,7 @@
  * Authors:
  *   2009-2014 Thomas White <taw@physics.org>
  *   2011-2012 Richard Kirian <rkirian@asu.edu>
+ *   2014      Valerio Mariani
  *   2011      Andrew Aquila
  *
  * This file is part of CrystFEL.
@@ -41,6 +42,9 @@ struct detector;
 struct panel;
 struct badregion;
 struct detector;
+struct beam_params;
+struct hdfile;
+struct event;
 
 #include "hdf5-file.h"
 #include "image.h"
@@ -80,12 +84,16 @@ struct panel
 	double   coffset;
 	double   clen;     /* Camera length in metres */
 	char    *clen_from;
+	char    *mask;
 	double   res;      /* Resolution in pixels per metre */
 	char     badrow;   /* 'x' or 'y' */
 	int      no_index; /* Don't index peaks in this panel if non-zero */
 	struct rigid_group *rigid_group;  /* Rigid group */
 	double   adu_per_eV;   /* Number of ADU per eV */
 	double   max_adu;  /* Treat pixel as unreliable if higher than this */
+	char    *data;
+
+	struct dim_structure *dim_structure;
 
 	double fsx;
 	double fsy;
@@ -96,6 +104,11 @@ struct panel
 	double yfs;
 	double xss;
 	double yss;
+
+	int orig_min_fs;
+	int orig_max_fs;
+	int orig_min_ss;
+	int orig_max_ss;
 
 	int w;  /* Width, calculated as max_fs-min_fs+1 */
 	int h;  /* Height, calculated as max_ss-min_ss+1 */
@@ -132,7 +145,6 @@ struct detector
 	struct badregion *bad;
 	int               n_bad;
 
-	char              *mask;
 	unsigned int       mask_bad;
 	unsigned int       mask_good;
 
@@ -151,6 +163,9 @@ struct detector
 	double             furthest_in_fs;
 	double             furthest_in_ss;
 
+	int                path_dim;
+	int                dim_dim;
+
 	struct panel       defaults;
 };
 
@@ -166,13 +181,14 @@ extern double get_tt(struct image *image, double xs, double ys, int *err);
 extern int in_bad_region(struct detector *det, double fs, double ss);
 
 extern void record_image(struct image *image, int do_poisson, int background,
-                         gsl_rng *rng);
+                         gsl_rng *rng, double beam_radius, double nphotons);
 
 extern struct panel *find_panel(struct detector *det, double fs, double ss);
 
 extern signed int find_panel_number(struct detector *det, double fs, double ss);
 
-extern struct detector *get_detector_geometry(const char *filename);
+extern struct detector *get_detector_geometry(const char *filename,
+                                              struct beam_params *beam);
 
 extern void free_detector_geometry(struct detector *det);
 
@@ -182,7 +198,8 @@ extern void get_pixel_extents(struct detector *det,
                               double *min_x, double *min_y,
                               double *max_x, double *max_y);
 
-extern void fill_in_values(struct detector *det, struct hdfile *f);
+extern void fill_in_values(struct detector *det, struct hdfile *f,
+                           struct event* ev);
 
 extern struct detector *copy_geom(const struct detector *in);
 
@@ -202,6 +219,10 @@ extern int write_detector_geometry(const char *filename, struct detector *det);
 
 extern void mark_resolution_range_as_bad(struct image *image,
                                          double min, double max);
+
+
+extern int single_panel_data_source (struct detector *det, const char *element);
+
 
 #ifdef __cplusplus
 }

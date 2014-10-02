@@ -56,7 +56,6 @@
 #include "utils.h"
 #include "peaks.h"
 #include "detector.h"
-#include "beam-parameters.h"
 #include "cell-utils.h"
 
 
@@ -619,8 +618,7 @@ int run_xds(struct image *image, IndexingPrivate *priv)
 
 
 IndexingPrivate *xds_prepare(IndexingMethod *indm, UnitCell *cell,
-                             struct detector *det, struct beam_params *beam,
-                             float *ltl)
+                             struct detector *det, float *ltl)
 {
 	struct xds_private *xp;
 
@@ -629,9 +627,12 @@ IndexingPrivate *xds_prepare(IndexingMethod *indm, UnitCell *cell,
 	 * but we'd have to decide whether the user just forgot the cell, or
 	 * forgot "-nolatt", or whatever. */
 	if ( ((*indm & INDEXING_USE_LATTICE_TYPE)
-	  || (*indm & INDEXING_USE_CELL_PARAMETERS)) && (cell == NULL) ) {
-		ERROR("No cell provided.  If you wanted to use XDS without "
-		      "prior cell information, use xds-nolatt-nocell.\n");
+	  || (*indm & INDEXING_USE_CELL_PARAMETERS))
+	  && !cell_has_parameters(cell) )
+	{
+		ERROR("No cell parameters provided.  If you wanted to use XDS "
+		      "without prior cell information, use "
+		      "xds-nolatt-nocell.\n");
 		return NULL;
 	}
 

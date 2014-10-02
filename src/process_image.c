@@ -8,6 +8,7 @@
  *
  * Authors:
  *   2010-2014 Thomas White <taw@physics.org>
+ *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
  *
@@ -42,7 +43,6 @@
 #include "detector.h"
 #include "filters.h"
 #include "thread-pool.h"
-#include "beam-parameters.h"
 #include "geometry.h"
 #include "stream.h"
 #include "reflist-utils.h"
@@ -67,40 +67,21 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	image.flags = NULL;
 	image.copyme = iargs->copyme;
 	image.id = cookie;
-	image.filename = pargs->filename;
+	image.filename = pargs->filename_p_e->filename;
+	image.event = pargs->filename_p_e->ev;
 	image.beam = iargs->beam;
 	image.det = iargs->det;
 	image.crystals = NULL;
 	image.n_crystals = 0;
 
 	hdfile = hdfile_open(image.filename);
-	if ( hdfile == NULL ) return;
-
-	if ( iargs->element != NULL ) {
-
-		int r;
-		r = hdfile_set_image(hdfile, iargs->element);
-		if ( r ) {
-			ERROR("Couldn't select path '%s'\n", iargs->element);
-			hdfile_close(hdfile);
-			return;
-		}
-
-	} else {
-
-		int r;
-		r = hdfile_set_first_image(hdfile, "/");
-		if ( r ) {
-			ERROR("Couldn't select first path\n");
-			hdfile_close(hdfile);
-			return;
-		}
-
+	if ( hdfile == NULL ) {
+		ERROR("Couldn't open file: %s\n", image.filename);
+		return;
 	}
 
-	check = hdf5_read(hdfile, &image, 1);
+	check = hdf5_read2(hdfile, &image, image.event, 0);
 	if ( check ) {
-		hdfile_close(hdfile);
 		return;
 	}
 
@@ -120,10 +101,22 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 
 	mark_resolution_range_as_bad(&image, iargs->highres, +INFINITY);
 
+	hdfile = hdfile_open(image.filename);
+	if ( hdfile == NULL ) {
+		ERROR("Couldn't open file %s.\n", image.filename);
+		return;
+	}
+
 	switch ( iargs->peaks ) {
 
 		case PEAK_HDF5:
 		/* Get peaks from HDF5 */
+
+		if ( !single_panel_data_source(iargs->det, iargs->element) ) {
+			ERROR("Peaks from HDF5 file not supported with "
+			      "multiple panel data sources.\n");
+		}
+
 		if ( get_peaks(&image, hdfile, iargs->hdf5_peak_path) ) {
 			ERROR("Failed to get peaks from HDF5 file.\n");
 		}
@@ -155,6 +148,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	if ( r ) {
 		ERROR("Failed to chdir to temporary folder: %s\n",
 		      strerror(errno));
+		hdfile_close(hdfile);
 		return;
 	}
 
@@ -164,6 +158,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	r = chdir(rn);
 	if ( r ) {
 		ERROR("Failed to chdir: %s\n", strerror(errno));
+		hdfile_close(hdfile);
 		return;
 	}
 
@@ -173,11 +168,11 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	}
 
 	/* Default parameters */
-	image.div = image.beam->divergence;
-	image.bw = image.beam->bandwidth;
+	image.div = 0.0;
+	image.bw = 0.001;
+	STATUS("Warning: div, bw and pr are hardcoded in this version.\n");
 	for ( i=0; i<image.n_crystals; i++ ) {
-		crystal_set_profile_radius(image.crystals[i],
-		                           image.beam->profile_radius);
+		crystal_set_profile_radius(image.crystals[i], 0.01e9);
 		crystal_set_mosaicity(image.crystals[i], 0.0);  /* radians */
 	}
 
@@ -189,7 +184,8 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	                iargs->int_diag_k, iargs->int_diag_l, results_pipe);
 
 	write_chunk(st, &image, hdfile,
-	            iargs->stream_peaks, iargs->stream_refls);
+	            iargs->stream_peaks, iargs->stream_refls,
+	            pargs->filename_p_e->ev);
 
 	for ( i=0; i<image.n_crystals; i++ ) {
 		cell_free(crystal_get_cell(image.crystals[i]));

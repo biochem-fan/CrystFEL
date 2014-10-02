@@ -9,9 +9,9 @@
  *
  * Authors:
  *   2009-2013 Thomas White <taw@physics.org>
- *   2012      Richard Kirian
  *   2014      Valerio Mariani
  *   2014      Takanori Nakane
+ *   2012      Richard Kirian
  *
  * This file is part of CrystFEL.
  *
@@ -49,8 +49,8 @@
 #include "hdf5-file.h"
 #include "hdfsee.h"
 #include "utils.h"
-#include "detector.h"
 #include "filters.h"
+#include "events.h"
 
 
 static void displaywindow_error(DisplayWindow *dw, const char *message)
@@ -72,6 +72,7 @@ static void displaywindow_error(DisplayWindow *dw, const char *message)
 /* Window closed - clean up */
 static gint displaywindow_closed(GtkWidget *window, DisplayWindow *dw)
 {
+
 	if ( dw->hdfile != NULL ) {
 		hdfile_close(dw->hdfile);
 	}
@@ -91,6 +92,7 @@ static gint displaywindow_closed(GtkWidget *window, DisplayWindow *dw)
 	}
 
 	if ( dw->image != NULL ) {
+
 		free(dw->image->filename);
 		free(dw->image->data);
 		free(dw->image->flags);
@@ -258,8 +260,6 @@ static void show_ring(cairo_t *cr, DisplayWindow *dw,
 {
 	struct detector *det;
 	int i;
-
-	if ( !dw->use_geom ) return;
 
 	det = dw->image->det;
 
@@ -462,6 +462,7 @@ static int draw_stuff(cairo_surface_t *surf, DisplayWindow *dw)
 			ss = f->ss;
 
 			p = find_panel(dw->image->det, fs, ss);
+
 			if ( p == NULL ) continue;
 
 			xs = (fs-p->min_fs)*p->fsx + (ss-p->min_ss)*p->ssx;
@@ -567,6 +568,7 @@ static void update_colscale(DisplayWindow *dw)
 
 static void displaywindow_update(DisplayWindow *dw)
 {
+
 	set_window_size(dw);
 	update_colscale(dw);
 
@@ -833,9 +835,9 @@ static gint displaywindow_set_boostint(GtkWidget *widget, DisplayWindow *dw)
 		return 0;
 	}
 
-	if ( dw->hdfile == NULL ) {
-		return 0;
-	}
+    if ( dw->hdfile == NULL ) {
+        return 0;
+    }
 
 	bd = malloc(sizeof(BoostIntDialog));
 	if ( bd == NULL ) return 0;
@@ -1015,32 +1017,53 @@ static void load_features_from_file(struct image *image, const char *filename)
 	do {
 		char line[1024];
 		float intensity, sigma, fs, ss;
+		float add_fs, add_ss;
 		char phs[1024];
+		char pn[32];
 		int r;
-		float cts;
+		float cts, d;
 		signed int h, k, l;
+		struct panel *p = NULL;
 
 		rval = fgets(line, 1023, fh);
 		if ( rval == NULL ) continue;
 		chomp(line);
 
 		/* Try long format (from stream) */
-		r = sscanf(line, "%i %i %i %f %s %f %f %f %f",
-		           &h, &k, &l, &intensity, phs, &sigma, &cts, &fs, &ss);
-		if ( r == 9 ) {
+		r = sscanf(line, "%i %i %i %f %s %f %f %f %f %s",
+		                   &h, &k, &l, &intensity, phs, &sigma, &cts,
+		                   &fs, &ss, pn);
+
+		if ( r == 10 ) {
 			char name[32];
 			snprintf(name, 31, "%i %i %i", h, k, l);
-			image_add_feature(image->features, fs, ss, image, 1.0,
-			                  strdup(name));
+
+			p = find_panel_by_name(image->det, pn);
+
+			add_fs = fs-p->orig_min_fs+p->min_fs;
+			add_ss = ss-p->orig_min_ss+p->min_ss;
+			image_add_feature(image->features, add_fs, add_ss,
+			                  image, 1.0, strdup(name));
 			continue;
 		}
 
-		r = sscanf(line, "%f %f", &fs, &ss);
-		if ( r != 2 ) continue;
+		r = sscanf(line, "%f %f %f %f %s", &fs, &ss, &d,
+		           &intensity, pn);
+		if ( r != 5 ) continue;
 
-		image_add_feature(image->features, fs, ss, image, 1.0, "peak");
+		p = find_panel_by_name(image->det, pn);
+		if ( p == NULL ) {
+			ERROR("Unable to find panel %s\n", pn);
+		} else {
+
+			add_fs = fs - p->orig_min_fs + p->min_fs;
+			add_ss = ss - p->orig_min_ss + p->min_ss;
+			image_add_feature(image->features, add_fs, add_ss,
+			                  image, 1.0, "peak");
+		}
 
 	} while ( rval != NULL );
+
 }
 
 
@@ -1106,50 +1129,6 @@ static gint displaywindow_about(GtkWidget *widget, DisplayWindow *dw)
 }
 
 
-static int load_geometry_file(DisplayWindow *dw, struct image *image,
-                              const char *filename)
-{
-	struct detector *geom;
-	GtkWidget *w;
-	int using_loaded = 0;
-	if ( dw->image->det == dw->loaded_geom ) using_loaded = 1;
-
-	geom = get_detector_geometry(filename);
-	if ( geom == NULL ) {
-		displaywindow_error(dw, "Failed to load geometry file");
-		return -1;
-	}
-	fill_in_values(geom, dw->hdfile);
-
-	if ( (1+geom->max_fs != dw->image->width)
-	  || (1+geom->max_ss != dw->image->height) ) {
-
-		displaywindow_error(dw, "Geometry doesn't match image.");
-		return -1;
-
-	}
-
-	/* Sort out the mess */
-	if ( dw->loaded_geom != NULL ) free_detector_geometry(dw->loaded_geom);
-	dw->loaded_geom = geom;
-	if ( using_loaded ) {
-		dw->image->det = dw->loaded_geom;
-	}
-
-	w = gtk_ui_manager_get_widget(dw->ui,
-				      "/ui/displaywindow/view/usegeom");
-	gtk_widget_set_sensitive(GTK_WIDGET(w), TRUE);
-	gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(w), TRUE);
-	dw->use_geom = 1;
-
-	w = gtk_ui_manager_get_widget(dw->ui,
-				      "/ui/displaywindow/tools/calibmode");
-	gtk_widget_set_sensitive(GTK_WIDGET(w), TRUE);
-
-	return 0;
-}
-
-
 static int save_geometry_file(DisplayWindow *dw)
 {
 	GtkWidget *d;
@@ -1169,49 +1148,6 @@ static int save_geometry_file(DisplayWindow *dw)
 	gtk_widget_destroy(d);
 	g_free(filename);
 	return w;
-}
-
-
-static gint displaywindow_loadgeom_response(GtkWidget *d, gint response,
-                                            DisplayWindow *dw)
-{
-	if ( response == GTK_RESPONSE_ACCEPT ) {
-
-		char *filename;
-
-		filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(d));
-
-		if ( load_geometry_file(dw, dw->image, filename) == 0 ) {
-			displaywindow_update(dw);
-		}
-
-		g_free(filename);
-
-	}
-
-	gtk_widget_destroy(d);
-
-	return 0;
-}
-
-
-static gint displaywindow_load_geom(GtkWidget *widget, DisplayWindow *dw)
-{
-	GtkWidget *d;
-
-	d = gtk_file_chooser_dialog_new("Load Geometry File",
-	                                GTK_WINDOW(dw->window),
-	                                GTK_FILE_CHOOSER_ACTION_OPEN,
-	                                GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL,
-	                                GTK_STOCK_OPEN, GTK_RESPONSE_ACCEPT,
-	                                NULL);
-
-	g_signal_connect(G_OBJECT(d), "response",
-	                 G_CALLBACK(displaywindow_loadgeom_response), dw);
-
-	gtk_widget_show_all(d);
-
-	return 0;
 }
 
 
@@ -1235,26 +1171,6 @@ static gint displaywindow_peak_overlay(GtkWidget *widget, DisplayWindow *dw)
 }
 
 
-static gint displaywindow_set_usegeom(GtkWidget *d, DisplayWindow *dw)
-{
-	GtkWidget *w;
-
-	/* Get new value */
-	w =  gtk_ui_manager_get_widget(dw->ui,
-				      "/ui/displaywindow/view/usegeom");
-	dw->use_geom = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(w));
-
-	if ( dw->use_geom ) {
-		dw->image->det = dw->loaded_geom;
-	} else {
-		dw->image->det = dw->simple_geom;
-	}
-
-	displaywindow_update(dw);
-
-	return 0;
-}
-
 static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 {
 	GtkWidget *w, *vbox;
@@ -1262,7 +1178,7 @@ static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 
 	w =  gtk_ui_manager_get_widget(dw->ui,
 	                               "/ui/displaywindow/tools/calibmode");
-	if ( !dw->use_geom ) {
+	if ( dw->image->det == dw->simple_geom ) {
 		gtk_check_menu_item_set_state(GTK_CHECK_MENU_ITEM(w), 0);
 		return 0;
 	}
@@ -1700,8 +1616,8 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 			G_CALLBACK(displaywindow_show_numbers) },
 		{ "PeaksAction", NULL, "Load Feature List...", NULL, NULL,
 			G_CALLBACK(displaywindow_peak_overlay) },
-		{ "LoadGeomAction", NULL, "Load Geometry File...", NULL, NULL,
-			G_CALLBACK(displaywindow_load_geom) },
+
+		{ "EventsAction", NULL, "_Events", NULL, NULL, NULL },
 
 		{ "HelpAction", NULL, "_Help", NULL, NULL, NULL },
 		{ "AboutAction", GTK_STOCK_ABOUT, "_About hdfsee...",
@@ -1712,12 +1628,10 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 	guint n_entries = G_N_ELEMENTS(entries);
 
 	GtkToggleActionEntry toggles[] = {
-		{ "GeometryAction", NULL, "Use Detector Geometry", NULL, NULL,
-			G_CALLBACK(displaywindow_set_usegeom), FALSE },
-		{ "CalibModeAction", NULL, "Calibration Mode", NULL, NULL,
-			G_CALLBACK(displaywindow_set_calibmode), FALSE },
 		{ "ColScaleAction", NULL, "Colour Scale", NULL, NULL,
 			G_CALLBACK(displaywindow_set_colscale), FALSE },
+		{ "CalibModeAction", NULL, "Calibration Mode", NULL, NULL,
+			G_CALLBACK(displaywindow_set_calibmode), FALSE },
 		{ "RingsAction", NULL, "Resolution Rings", "F9", NULL,
 			G_CALLBACK(displaywindow_set_rings), dw->show_rings },
 		{ "ShowPeaksAction", NULL, "Features", "F8", NULL,
@@ -1760,16 +1674,6 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 }
 
 
-
-static int geometry_fits(struct image *image, struct detector *geom)
-{
-	if ( (1+geom->max_fs != image->width)
-	  || (1+geom->max_ss != image->height) ) return 0;
-
-	return 1;
-}
-
-
 static void do_filters(DisplayWindow *dw)
 {
 	if ( dw->median_filter > 0 ) {
@@ -1781,7 +1685,6 @@ static void do_filters(DisplayWindow *dw)
 	}
 }
 
-
 struct newhdf {
 	DisplayWindow *dw;
 	GtkWidget *widget;
@@ -1791,59 +1694,23 @@ struct newhdf {
 static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh)
 {
 	gboolean a;
+	int fail;
 
 	if ( nh->dw->not_ready_yet ) return 0;
 
 	a = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(nh->widget));
 	if ( !a ) return 0;
 
-	hdfile_set_image(nh->dw->hdfile, nh->name);
-	hdf5_read(nh->dw->hdfile, nh->dw->image, 0);
-
-	/* Check that the geometry still fits */
-	if ( !geometry_fits(nh->dw->image, nh->dw->simple_geom) ) {
-		int using = 0;
-		if ( nh->dw->simple_geom == nh->dw->image->det ) {
-			using = 1;
-		}
-		free_detector_geometry(nh->dw->simple_geom);
-		nh->dw->simple_geom = simple_geometry(nh->dw->image);
-		if ( using ) {
-			nh->dw->image->det = nh->dw->simple_geom;
-		}
+	fail = hdf5_read(nh->dw->hdfile, nh->dw->image, nh->name, 0);
+	if ( fail ) {
+		ERROR("Couldn't load image");
+		return 1;
 	}
 
-	if ( (nh->dw->loaded_geom != NULL )
-	  && (!geometry_fits(nh->dw->image, nh->dw->loaded_geom)) ) {
-
-		GtkWidget *w;
-
-		free_detector_geometry(nh->dw->loaded_geom);
-		nh->dw->loaded_geom = NULL;
-
-		/* Force out of "use geometry" mode */
-		w = gtk_ui_manager_get_widget(nh->dw->ui,
-				      "/ui/displaywindow/view/usegeom");
-		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
-
-		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(w), FALSE);
-		nh->dw->use_geom = 0;
-		nh->dw->image->det = nh->dw->simple_geom;
-
-		w = gtk_ui_manager_get_widget(nh->dw->ui,
-					   "/ui/displaywindow/tools/calibmode");
-		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
-
-	}
-
-	if ( nh->dw->use_geom ) {
-		nh->dw->image->det = nh->dw->loaded_geom;
-	} else {
-		nh->dw->image->det = nh->dw->simple_geom;
-	}
+	nh->dw->simple_geom = simple_geometry(nh->dw->image);
+	nh->dw->image->det = nh->dw->simple_geom;
 
 	do_filters(nh->dw);
-
 	displaywindow_update(nh->dw);
 	return 0;
 }
@@ -1859,8 +1726,6 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 	int *is_image;
 	GtkWidget *ms;
 	int n, i;
-
-	if ( hdfile == NULL ) return NULL;
 
 	names = hdfile_read_group(hdfile, &n, group, &is_group, &is_image);
 	if ( n == 0 ) return NULL;
@@ -1879,7 +1744,7 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 			item = gtk_menu_item_new_with_label(names[i]);
 
 			sub = displaywindow_addhdfgroup(hdfile, names[i],
-			                                dw, rgp, selectme);
+                                            dw, rgp, selectme);
 			gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), sub);
 
 		} else if ( is_image[i] ) {
@@ -1895,7 +1760,7 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 				nh->dw = dw;
 				nh->widget = item;
 				g_signal_connect(G_OBJECT(item), "toggled",
-			                  G_CALLBACK(displaywindow_newhdf), nh);
+				          G_CALLBACK(displaywindow_newhdf), nh);
 			}
 
 			if ( (selectme != NULL)
@@ -1907,8 +1772,7 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 				              GTK_CHECK_MENU_ITEM(item), FALSE);
 			}
 
-			*rgp = gtk_radio_menu_item_get_group(
-		                                     GTK_RADIO_MENU_ITEM(item));
+			*rgp = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(item));
 
 		} else {
 
@@ -1917,7 +1781,7 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 			item = gtk_menu_item_new_with_label(names[i]);
 
 			if ( hdfile_is_scalar(hdfile, names[i], 0) ) {
-				tmp = hdfile_get_string_value(hdfile, names[i]);
+				tmp = hdfile_get_string_value(hdfile, names[i], NULL);
 			} else {
 				tmp = NULL;
 			}
@@ -1932,16 +1796,13 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 				gtk_menu_shell_append(GTK_MENU_SHELL(mss), ss);
 				gtk_menu_item_set_submenu(GTK_MENU_ITEM(item),
 				                          mss);
-
 			}
-
 
 		}
 
 		gtk_menu_shell_append(GTK_MENU_SHELL(ms), item);
 
 		free(names[i]);
-
 
 	}
 
@@ -1957,9 +1818,19 @@ static GtkWidget *displaywindow_createhdfmenus(struct hdfile *hdfile,
                                                const char *selectme)
 {
 	GSList *rg = NULL;
+	GtkWidget *w;
 
-	return displaywindow_addhdfgroup(hdfile, "/", dw, &rg, selectme);
+	w = displaywindow_addhdfgroup(hdfile, "/", dw, &rg, selectme);
+
+	return w;
 }
+
+
+struct newev {
+    DisplayWindow *dw;
+    GtkWidget *widget;
+    int new_ev;
+};
 
 
 static int displaywindow_update_menus(DisplayWindow *dw, const char *selectme)
@@ -1979,6 +1850,91 @@ static int displaywindow_update_menus(DisplayWindow *dw, const char *selectme)
 
 	return 0;
 }
+
+
+static gint displaywindow_newevent(GtkMenuItem *item, struct newev *ne)
+{
+	gboolean a;
+	int fail;
+
+	if ( ne->dw->not_ready_yet ) return 0;
+
+	a = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(ne->widget));
+	if ( !a ) return 0;
+
+	fail = hdf5_read2(ne->dw->hdfile, ne->dw->image,
+                      ne->dw->ev_list->events[ne->new_ev], 0);
+	if ( fail ) {
+		ERROR("Couldn't load image");
+		return 1;
+	}
+
+	ne->dw->curr_event = ne->new_ev;
+
+	do_filters(ne->dw);
+	displaywindow_update(ne->dw);
+	return 0;
+}
+
+
+static int displaywindow_update_event_menu(DisplayWindow *dw,
+                                           struct event_list *ev_list,
+                                           int curr_event)
+{
+
+	int ei;
+	GtkWidget *w;
+	GtkWidget *ww;
+	GSList *grp = NULL;
+
+	w = gtk_ui_manager_get_widget(dw->ui,
+	                              "/ui/displaywindow/events");
+
+	ww = gtk_menu_new();
+
+	for ( ei=0; ei< ev_list->num_events; ei++ ) {
+
+		GtkWidget *www;
+		struct newev *ne;
+		char *ev_string;
+
+		ev_string = get_event_string(ev_list->events[ei]);
+		www = gtk_radio_menu_item_new_with_label(grp, ev_string);
+		free(ev_string);
+
+		ne = malloc(sizeof(struct newev));
+		if ( ne != NULL ) {
+
+			ne->widget = www;
+			ne->dw = dw;
+			ne->new_ev = ei;
+
+			g_signal_connect(G_OBJECT(www), "toggled",
+			                 G_CALLBACK(displaywindow_newevent), ne);
+
+		}
+
+		if ( ei == dw->curr_event ) {
+			gtk_check_menu_item_set_active(
+			             GTK_CHECK_MENU_ITEM(www), TRUE);
+		} else {
+			gtk_check_menu_item_set_active(
+			             GTK_CHECK_MENU_ITEM(www), FALSE);
+		}
+
+		gtk_menu_shell_append(GTK_MENU_SHELL(ww), www);
+
+		grp = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(www));
+
+	}
+
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(w), ww);
+	gtk_widget_show_all(w);
+
+	return 0;
+
+}
+
 
 
 static gint displaywindow_release(GtkWidget *widget, GdkEventButton *event,
@@ -2429,11 +2385,12 @@ static gint displaywindow_keypress(GtkWidget *widget, GdkEventKey *event,
 }
 
 
-DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
+DisplayWindow *displaywindow_open(char *filename, const char *peaks,
                                   double boost, int binning,
                                   int noisefilter, int calibmode, int colscale,
-                                  const char *element, const char *geometry,
-                                  const char *beam,
+                                  const char *element,
+                                  struct detector *det_geom,
+                                  struct beam_params *beam,
                                   int show_rings, double *ring_radii,
                                   int n_rings, double ring_size,
                                   int median_filter)
@@ -2441,6 +2398,7 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	DisplayWindow *dw;
 	char *title;
 	GtkWidget *vbox;
+	int check;
 	GtkWidget *w;
 	GtkWidget *ww;
 
@@ -2454,8 +2412,8 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	dw->boostint = 1;
 	dw->motion_callback = 0;
 	dw->numbers_window = NULL;
+	dw->simple_geom = NULL;
 	dw->image = NULL;
-	dw->use_geom = 0;
 	dw->show_rings = show_rings;
 	dw->show_peaks = 0;
 	dw->scale = colscale;
@@ -2474,51 +2432,74 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	dw->calib_mode_curr_p = NULL;
 	dw->calib_mode_show_focus = 1;
 	dw->statusbar = NULL;
+	dw->multi_event = 0;
+	dw->curr_event = 0;
+	dw->ev_list = NULL;
 
-	if ( beam != NULL ) {
-		dw->image->beam = get_beam_parameters(beam);
-	}
+	dw->image->det = det_geom;
+	dw->image->beam = beam;
 
-	if ( (dw->image->beam != NULL) && (dw->hdfile != NULL) ) {
-		fill_in_beam_parameters(dw->image->beam, dw->hdfile);
-	}
-
-	/* Open the file, if any */
-	if ( filename != NULL ) {
-
-		dw->hdfile = hdfile_open(filename);
-		if ( dw->hdfile == NULL ) {
-			free(dw);
-			return NULL;
-		} else {
-			int fail = -1;
-
-			if ( element == NULL ) {
-				fail = hdfile_set_first_image(dw->hdfile, "/");
-			} else {
-				fail = hdfile_set_image(dw->hdfile, element);
-			}
-
-			if ( !fail ) {
-				dw->image->filename = strdup(filename);
-				hdf5_read(dw->hdfile, dw->image, 0);
-			} else {
-				ERROR("Couldn't select path\n");
-				free(dw);
-				return NULL;
-			}
-		}
-
-	} else {
+	dw->hdfile = hdfile_open(filename);
+	if ( dw->hdfile == NULL ) {
+		ERROR("Couldn't open file: %s\n", filename);
 		free(dw);
 		return NULL;
 	}
-	dw->loaded_geom = NULL;
-	dw->simple_geom = simple_geometry(dw->image);
-	dw->image->det = dw->simple_geom;
+
+	if ( dw->image->det != NULL && ( dw->image->det->path_dim != 0 ||
+	                                 dw->image->det->dim_dim != 0  )) {
+
+		dw->multi_event = 1;
+
+		dw->ev_list = fill_event_list(dw->hdfile, dw->image->det);
+
+		if ( dw->ev_list == NULL ) {
+			ERROR("Error while parsing file structure\n");
+			free_event_list(dw->ev_list);
+			free(dw);
+			return NULL;
+		}
+		if ( dw->ev_list->num_events == 0 ) {
+			ERROR("Multi-event geometry file but no events found "
+			      "in data file\n");
+			free_event_list(dw->ev_list);
+			free(dw);
+			return NULL;
+		} else {
+			dw->curr_event = 0;
+		}
+
+	}
+
+	if ( dw->image->det != NULL ) {
+
+		if ( dw->multi_event ) {
+			check = hdf5_read2(dw->hdfile, dw->image,
+			                   dw->ev_list->events[dw->curr_event],
+			                   0);
+		} else {
+			check = hdf5_read2(dw->hdfile, dw->image, NULL, 0);
+		}
+
+	} else {
+		check =	hdf5_read(dw->hdfile, dw->image, element, 0);
+	}
+	if (check) {
+		ERROR("Couldn't load file\n");
+		free(dw);
+		hdfile_close(dw->hdfile);
+		return NULL;
+	}
+
+	dw->image->filename = strdup(filename);
+
+	if ( dw->image->det == NULL ) {
+		dw->simple_geom = simple_geometry(dw->image);
+		dw->image->det = dw->simple_geom;
+	}
 
 	/* Filters need geometry */
-	do_filters(dw);
+		do_filters(dw);
 
 	/* Peak list provided at startup? */
 	if ( peaks != NULL ) {
@@ -2556,24 +2537,18 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	gtk_window_set_resizable(GTK_WINDOW(dw->window), TRUE);
 	gtk_widget_show_all(dw->window);
 
-	w = gtk_ui_manager_get_widget(dw->ui, "/ui/displaywindow/view/usegeom");
-	gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
-	if ( geometry != NULL ) {
-		load_geometry_file(dw, dw->image, geometry);
-	}
+	w = gtk_ui_manager_get_widget(dw->ui,
+	                   "/ui/displaywindow/view/images");
 
-	if ( dw->use_geom ) {
-		dw->calib_mode = calibmode;
-	} else {
-		w = gtk_ui_manager_get_widget(dw->ui,
-		                           "/ui/displaywindow/tools/calibmode");
+	if ( dw->image->det != dw->simple_geom ) {
 		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
 	}
 
-	if ( dw->calib_mode ) {
-		ww = gtk_ui_manager_get_widget(dw->ui,
-		                           "/ui/displaywindow/tools/calibmode");
-		gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(ww), TRUE);
+	ww = gtk_ui_manager_get_widget(dw->ui,
+	                  "/ui/displaywindow/events");
+
+	if ( dw->image->det == dw->simple_geom || dw->multi_event == 0) {
+		gtk_widget_set_sensitive(GTK_WIDGET(ww), FALSE);
 	}
 
 	displaywindow_update(dw);
@@ -2594,7 +2569,14 @@ DisplayWindow *displaywindow_open(const char *filename, const char *peaks,
 	g_signal_connect(GTK_OBJECT(dw->drawingarea), "key-press-event",
 	                 G_CALLBACK(displaywindow_keypress), dw);
 
-	displaywindow_update_menus(dw, element);
+	if ( dw->image->det == dw->simple_geom ) {
+		displaywindow_update_menus(dw, element);
+	} else {
+		if ( dw->multi_event != 0 ) {
+			displaywindow_update_event_menu(dw, dw->ev_list, dw->curr_event);
+		}
+	}
+
 	dw->not_ready_yet = 0;
 
 	return dw;
