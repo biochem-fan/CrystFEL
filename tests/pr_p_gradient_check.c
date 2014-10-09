@@ -45,7 +45,8 @@
 
 
 static void scan_partialities(RefList *reflections, RefList *compare,
-                              int *valid, long double *vals[3], int idx)
+                              int *valid, long double *vals[3], int idx,
+                              PartialityModel pmodel)
 {
 	int i;
 	Reflection *refl;
@@ -58,8 +59,7 @@ static void scan_partialities(RefList *reflections, RefList *compare,
 	{
 		signed int h, k, l;
 		Reflection *refl2;
-		double r1, r2, p;
-		int clamp_low, clamp_high;
+		double rlow, rhigh, p;
 
 		get_indices(refl, &h, &k, &l);
 		refl2 = find_refl(compare, h, k, l);
@@ -69,23 +69,13 @@ static void scan_partialities(RefList *reflections, RefList *compare,
 			continue;
 		}
 
-		get_partial(refl2, &r1, &r2, &p, &clamp_low, &clamp_high);
-		if ( clamp_low && clamp_high ) {
-			if ( !within_tolerance(p, 1.0, 0.001) ) {
-
-				signed int h, k, l;
-
-				get_indices(refl, &h, &k, &l);
-
-				ERROR("%3i %3i %3i - double clamped but"
-				      " partiality not close to 1.0 (%5.2f)\n",
-				      h, k, l, p);
-
-			}
-			valid[i] = 0;
+		get_partial(refl2, &rlow, &rhigh, &p);
+		vals[idx][i] = p;
+		if ( unlikely(p < 0.0) ) {
+			ERROR("Negative partiality! %3i %3i %3i  %f\n",
+			      h, k, l, p);
 		}
 
-		vals[idx][i] = p;
 		i++;
 	}
 }
@@ -190,7 +180,7 @@ static void calc_either_side(Crystal *cr, double incr_val,
 		cr_new = new_shifted_crystal(cr, refine, -incr_val);
 		compare = find_intersections(image, cr_new, pmodel);
 		scan_partialities(crystal_get_reflections(cr), compare, valid,
-		                  vals, 0);
+		                  vals, 0, pmodel);
 		cell_free(crystal_get_cell(cr_new));
 		crystal_free(cr_new);
 		reflist_free(compare);
@@ -198,7 +188,7 @@ static void calc_either_side(Crystal *cr, double incr_val,
 		cr_new = new_shifted_crystal(cr, refine, +incr_val);
 		compare = find_intersections(image, cr_new, pmodel);
 		scan_partialities(crystal_get_reflections(cr), compare, valid,
-		                  vals, 2);
+		                  vals, 2, pmodel);
 		cell_free(crystal_get_cell(cr_new));
 		crystal_free(cr_new);
 		reflist_free(compare);
@@ -212,14 +202,14 @@ static void calc_either_side(Crystal *cr, double incr_val,
 		shift_parameter(&im_moved, refine, -incr_val);
 		compare = find_intersections(&im_moved, cr, pmodel);
 		scan_partialities(crystal_get_reflections(cr), compare,
-		                  valid, vals, 0);
+		                  valid, vals, 0, pmodel);
 		reflist_free(compare);
 
 		im_moved = *image;
 		shift_parameter(&im_moved, refine, +incr_val);
 		compare = find_intersections(&im_moved, cr, pmodel);
 		scan_partialities(crystal_get_reflections(cr), compare,
-		                  valid, vals, 2);
+		                  valid, vals, 2, pmodel);
 		reflist_free(compare);
 
 	}
@@ -271,7 +261,7 @@ static double test_gradients(Crystal *cr, double incr_val, int refine,
 	}
 	for ( i=0; i<nref; i++ ) valid[i] = 1;
 
-	scan_partialities(reflections, reflections, valid, vals, 1);
+	scan_partialities(reflections, reflections, valid, vals, 1, pmodel);
 
 	calc_either_side(cr, incr_val, valid, vals, refine, pmodel);
 
@@ -307,7 +297,6 @@ static double test_gradients(Crystal *cr, double incr_val, int refine,
 		} else {
 
 			double r1, r2, p;
-			int cl, ch;
 
 			grad1 = (vals[1][i] - vals[0][i]) / incr_val;
 			grad2 = (vals[2][i] - vals[1][i]) / incr_val;
@@ -316,7 +305,7 @@ static double test_gradients(Crystal *cr, double incr_val, int refine,
 
 			cgrad = p_gradient(cr, refine, refl, pmodel);
 
-			get_partial(refl, &r1, &r2, &p, &cl, &ch);
+			get_partial(refl, &r1, &r2, &p);
 
 			if ( isnan(cgrad) ) {
 				n_nan++;
@@ -450,23 +439,19 @@ int main(int argc, char *argv[])
 
 	rng = gsl_rng_alloc(gsl_rng_mt19937);
 
-	for ( i=0; i<3; i++ ) {
+	for ( i=0; i<2; i++ ) {
 
 		UnitCell *rot;
 		double val;
 		PartialityModel pmodel;
 
 		if ( i == 0 ) {
-			pmodel = PMODEL_SPHERE;
-			STATUS("Testing flat sphere model:\n");
+			pmodel = PMODEL_SCSPHERE;
+			STATUS("Testing SCSphere model:\n");
 		} else if ( i == 1 ) {
-			pmodel = PMODEL_GAUSSIAN;
-			/* FIXME: Gradients for Gaussian model are not good */
-			STATUS("NOT testing Gaussian model.\n");
+			pmodel = PMODEL_SCGAUSSIAN;
+			STATUS("NOT Testing SCGaussian model.\n");
 			continue;
-		} else if ( i == 2 ) {
-			pmodel = PMODEL_THIN;
-			STATUS("Testing Thin Ewald Sphere model:\n");
 		} else {
 			ERROR("WTF?\n");
 			return 1;

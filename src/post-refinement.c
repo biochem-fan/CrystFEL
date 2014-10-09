@@ -55,22 +55,43 @@
 #define MAX_CYCLES (10)
 
 
-static double dpdq(double r, double profile_radius)
+/* Returns dp(gauss)/dr at "r" */
+static double gaussian_fraction_gradient(double r, double R)
 {
-	double q;
+	const double ng = 2.6;
 
-	/* Calculate degree of penetration */
-	q = (r + profile_radius)/(2.0*profile_radius);
+	/* If the Ewald sphere isn't within the profile, the gradient is zero */
+	if ( r < -R ) return 0.0;
+	if ( r > +R ) return 0.0;
 
-	return 6.0*(q-q*q);
+	return ng/(R*sqrt(2.0*M_PI)) * exp(-pow(r*ng/R, 2.0)/2.0);
+}
+
+
+/* Returns dp(sph)/dr at "r" */
+static double sphere_fraction_gradient(double r, double pr)
+{
+	double q, dpdq, dqdr;
+
+	/* If the Ewald sphere isn't within the profile, the gradient is zero */
+	if ( r < -pr ) return 0.0;
+	if ( r > +pr ) return 0.0;
+
+	q = (r + pr)/(2.0*pr);
+	dpdq = 6.0*(q - q*q);
+	dqdr = 1.0 / (2.0*pr);
+	return dpdq * dqdr;
 }
 
 
 /* Returns dp/dr at "r" */
-static double partiality_gradient(double r, double profile_radius,
-                                  PartialityModel pmodel)
+static double partiality_gradient(double r, double pr,
+                                  PartialityModel pmodel,
+                                  double rlow, double rhigh)
 {
-	double dqdr;  /* dq/dr */
+	double A, D;
+
+	D = rlow - rhigh;
 
 	switch ( pmodel ) {
 
@@ -78,47 +99,75 @@ static double partiality_gradient(double r, double profile_radius,
 		case PMODEL_UNITY:
 		return 0.0;
 
-		case PMODEL_SPHERE:
-		dqdr = 1.0 / (2.0*profile_radius);
-		return dpdq(r, profile_radius) * dqdr;
+		case PMODEL_SCSPHERE:
+		A = sphere_fraction_gradient(r, pr)/D;
+		return 4.0*pr*A/3.0;
 
-		case PMODEL_GAUSSIAN:
-		/* FIXME: Get a proper gradient */
-		dqdr = 1.0 / (2.0*profile_radius);
-		return dpdq(r, profile_radius) * dqdr;
-
-		case PMODEL_THIN:
-		return -(2.0*r)/(profile_radius*profile_radius);
+		case PMODEL_SCGAUSSIAN:
+		A = gaussian_fraction_gradient(r, pr)/D;
+		return 4.0*pr*A/3.0;
 
 	}
 }
 
 
-/* Returns dp/drad at "r" */
-static double partiality_rgradient(double r, double profile_radius,
-                                   PartialityModel pmodel)
+static double sphere_fraction_rgradient(double r, double R)
 {
-	double dqdrad;  /* dq/drad */
+	/* If the Ewald sphere isn't within the profile, the gradient is zero */
+	if ( r < -R ) return 0.0;
+	if ( r > +R ) return 0.0;
 
-	switch ( pmodel ) {
+	return -(3.0*r/(4.0*R*R)) * (1.0 - r*r/(R*R));
+}
 
-		default:
-		case PMODEL_UNITY:
-		return 0.0;
 
-		case PMODEL_SPHERE:
-		dqdrad = -0.5 * r / (profile_radius * profile_radius);
-		return dpdq(r, profile_radius) * dqdrad;
+static double gaussian_fraction_rgradient(double r, double R)
+{
+	/* If the Ewald sphere isn't within the profile, the gradient is zero */
+	if ( r < -R ) return 0.0;
+	if ( r > +R ) return 0.0;
 
-		case PMODEL_GAUSSIAN:
-		/* FIXME: Get a proper gradient */
-		dqdrad = -0.5 * r / (profile_radius * profile_radius);
-		return dpdq(r, profile_radius) * dqdrad;
+	return -(3.0*r/(4.0*R*R)) * (1.0 - r*r/(R*R));
+}
 
-		case PMODEL_THIN:
-		return 2.0*r*r*pow(profile_radius, -3.0);
 
+static double volume_fraction_rgradient(double r, double pr,
+                                       PartialityModel pmodel)
+{
+	switch ( pmodel )
+	{
+		case PMODEL_UNITY :
+		return 1.0;
+
+		case PMODEL_SCSPHERE :
+		return sphere_fraction_rgradient(r, pr);
+
+		case PMODEL_SCGAUSSIAN :
+		return gaussian_fraction_rgradient(r, pr);
 	}
+
+	ERROR("No pmodel in volume_fraction_rgradient!\n");
+	return 1.0;
+}
+
+
+static double volume_fraction(double rlow, double rhigh, double pr,
+                              PartialityModel pmodel)
+{
+	switch ( pmodel )
+	{
+		case PMODEL_UNITY :
+		return 1.0;
+
+		case PMODEL_SCSPHERE :
+		return sphere_fraction(rlow, rhigh, pr);
+
+		case PMODEL_SCGAUSSIAN :
+		return gaussian_fraction(rlow, rhigh, pr);
+	}
+
+	ERROR("No pmodel in volume_fraction!\n");
+	return 1.0;
 }
 
 
@@ -126,23 +175,44 @@ static double partiality_rgradient(double r, double profile_radius,
  * of 'image'. */
 double p_gradient(Crystal *cr, int k, Reflection *refl, PartialityModel pmodel)
 {
-	double ds, azi;
+	double azi;
 	double glow, ghigh;
 	double asx, asy, asz;
 	double bsx, bsy, bsz;
 	double csx, csy, csz;
 	double xl, yl, zl;
+	double ds;
 	signed int hs, ks, ls;
 	double rlow, rhigh, p;
-	int clamp_low, clamp_high;
 	double philow, phihigh, phi;
 	double khigh, klow;
 	double tl, cet, cez;
-	double gr;
 	struct image *image = crystal_get_image(cr);
-	double r = crystal_get_profile_radius(cr);
+	double R = crystal_get_profile_radius(cr);
+	double D, psph;
+
+	get_partial(refl, &rlow, &rhigh, &p);
+
+	if ( k == REF_R ) {
+
+		double Rglow, Rghigh;
+
+		D = rlow - rhigh;
+		psph = volume_fraction(rlow, rhigh, R, pmodel);
+
+		Rglow = volume_fraction_rgradient(rlow, R, pmodel);
+		Rghigh = volume_fraction_rgradient(rhigh, R, pmodel);
+
+		return 4.0*psph/(3.0*D) + (4.0*R/(3.0*D))*(Rglow - Rghigh);
+
+	}
+
+	/* Calculate the gradient of partiality wrt excitation error. */
+	glow = partiality_gradient(rlow, R, pmodel, rlow, rhigh);
+	ghigh = partiality_gradient(rhigh, R, pmodel, rlow, rhigh);
 
 	get_symmetric_indices(refl, &hs, &ks, &ls);
+	ds = 2.0 * resolution(crystal_get_cell(cr), hs, ks, ls);
 
 	cell_get_reciprocal(crystal_get_cell(cr), &asx, &asy, &asz,
 	                                          &bsx, &bsy, &bsz,
@@ -151,9 +221,6 @@ double p_gradient(Crystal *cr, int k, Reflection *refl, PartialityModel pmodel)
 	yl = hs*asy + ks*bsy + ls*csy;
 	zl = hs*asz + ks*bsz + ls*csz;
 
-	ds = 2.0 * resolution(crystal_get_cell(cr), hs, ks, ls);
-	get_partial(refl, &rlow, &rhigh, &p, &clamp_low, &clamp_high);
-
 	/* "low" gives the largest Ewald sphere (wavelength short => k large)
 	 * "high" gives the smallest Ewald sphere (wavelength long => k small)
 	 */
@@ -161,70 +228,19 @@ double p_gradient(Crystal *cr, int k, Reflection *refl, PartialityModel pmodel)
 	khigh = 1.0/(image->lambda + image->lambda*image->bw/2.0);
 
 	tl = sqrt(xl*xl + yl*yl);
-	ds = modulus(xl, yl, zl);
 
 	cet = -sin(image->div/2.0) * klow;
 	cez = -cos(image->div/2.0) * klow;
-	philow = M_PI_2 - angle_between_2d(tl-cet, zl-cez, 1.0, 0.0);
+	philow = angle_between_2d(tl-cet, zl-cez, 0.0, 1.0);
 
 	cet = -sin(image->div/2.0) * khigh;
 	cez = -cos(image->div/2.0) * khigh;
-	phihigh = M_PI_2 - angle_between_2d(tl-cet, zl-cez, 1.0, 0.0);
+	phihigh = angle_between_2d(tl-cet, zl-cez, 0.0, 1.0);
 
 	/* Approximation: philow and phihigh are very similar */
 	phi = (philow + phihigh) / 2.0;
 
 	azi = atan2(yl, xl);
-
-	/* Calculate the gradient of partiality wrt excitation error. */
-	if ( clamp_low == 0 ) {
-		glow = partiality_gradient(rlow, r, pmodel);
-	} else {
-		glow = 0.0;
-	}
-	if ( clamp_high == 0 ) {
-		ghigh = partiality_gradient(rhigh, r, pmodel);
-	} else {
-		ghigh = 0.0;
-	}
-
-	if ( k == REF_R ) {
-		switch ( pmodel ) {
-
-			default:
-			case PMODEL_UNITY:
-			return 0.0;
-
-			case PMODEL_GAUSSIAN:
-			gr  = partiality_rgradient(rlow, r, pmodel);
-			gr -= partiality_rgradient(rhigh, r, pmodel);
-			return gr;
-
-			case PMODEL_SPHERE:
-			gr  = partiality_rgradient(rlow, r, pmodel);
-			gr -= partiality_rgradient(rhigh, r, pmodel);
-			return gr;
-
-			case PMODEL_THIN:
-			return 2.0*rlow*rlow/(r*r*r);
-		}
-	}
-
-	if ( k == REF_DIV ) {
-		switch ( pmodel ) {
-
-			default:
-			case PMODEL_UNITY:
-			return 0.0;
-
-			case PMODEL_GAUSSIAN:
-			case PMODEL_SPHERE:
-			return (ds*glow + ds*ghigh) / 2.0;
-
-			case PMODEL_THIN:
-			return 0.0;
-		}
-	}
 
 	/* For many gradients, just multiply the above number by the gradient
 	 * of excitation error wrt whatever. */
@@ -232,55 +248,41 @@ double p_gradient(Crystal *cr, int k, Reflection *refl, PartialityModel pmodel)
 
 		/* Cell parameters and orientation */
 		case REF_ASX :
-		return hs * sin(phi) * cos(azi) * (ghigh-glow);
+		return - hs * sin(phi) * cos(azi) * (glow-ghigh);
 
 		case REF_BSX :
-		return ks * sin(phi) * cos(azi) * (ghigh-glow);
+		return - ks * sin(phi) * cos(azi) * (glow-ghigh);
 
 		case REF_CSX :
-		return ls * sin(phi) * cos(azi) * (ghigh-glow);
+		return - ls * sin(phi) * cos(azi) * (glow-ghigh);
 
 		case REF_ASY :
-		return hs * sin(phi) * sin(azi) * (ghigh-glow);
+		return - hs * sin(phi) * sin(azi) * (glow-ghigh);
 
 		case REF_BSY :
-		return ks * sin(phi) * sin(azi) * (ghigh-glow);
+		return - ks * sin(phi) * sin(azi) * (glow-ghigh);
 
 		case REF_CSY :
-		return ls * sin(phi) * sin(azi) * (ghigh-glow);
+		return - ls * sin(phi) * sin(azi) * (glow-ghigh);
 
 		case REF_ASZ :
-		return hs * cos(phi) * (ghigh-glow);
+		return - hs * cos(phi) * (glow-ghigh);
 
 		case REF_BSZ :
-		return ks * cos(phi) * (ghigh-glow);
+		return - ks * cos(phi) * (glow-ghigh);
 
 		case REF_CSZ :
-		return ls * cos(phi) * (ghigh-glow);
+		return - ls * cos(phi) * (glow-ghigh);
+
+		case REF_DIV :
+		D = rlow - rhigh;
+		psph = volume_fraction(rlow, rhigh, R, pmodel);
+		return (ds/2.0)*(glow+ghigh) - 4.0*R*psph*ds/(3.0*D*D);
 
 	}
 
 	ERROR("No gradient defined for parameter %i\n", k);
 	abort();
-}
-
-
-/* Return the gradient of Lorentz factor wrt parameter 'k' given the current
- * status of 'image'. */
-double l_gradient(Crystal *cr, int k, Reflection *refl, PartialityModel pmodel)
-{
-	double ds;
-	signed int hs, ks, ls;
-	double L;
-
-	if ( k != REF_DIV ) return 0.0;
-
-	get_symmetric_indices(refl, &hs, &ks, &ls);
-
-	ds = 2.0 * resolution(crystal_get_cell(cr), hs, ks, ls);
-
-	L = get_lorentz(refl);
-	return -ds*L*L / LORENTZ_SCALE;
 }
 
 
@@ -549,10 +551,7 @@ static double pr_iterate(Crystal *cr, const RefList *full,
 
 		/* Calculate all gradients for this reflection */
 		for ( k=0; k<NUM_PARAMS; k++ ) {
-			double gr;
-			gr  = p_gradient(cr, k, refl, pmodel) * l;
-			gr += l_gradient(cr, k, refl, pmodel) * p;
-			gradients[k] = gr;
+			gradients[k] = p_gradient(cr, k, refl, pmodel) * l;
 		}
 
 		for ( k=0; k<NUM_PARAMS; k++ ) {
