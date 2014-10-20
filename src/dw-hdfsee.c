@@ -1445,6 +1445,14 @@ gint stream_table_sort_func(GtkTreeModel *model, GtkTreeIter *a, GtkTreeIter *b,
 		}
 		break;
 	}
+	case COLUMN_FILENAME:
+	{
+		gchar *filea, *fileb;
+		gtk_tree_model_get(model, a, COLUMN_FILENAME, &filea, -1);
+		gtk_tree_model_get(model, b, COLUMN_FILENAME, &fileb, -1);
+		ret = strcmp(filea, fileb);
+		break;
+	}
 	}
 	return ret;
 }
@@ -1518,6 +1526,9 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	gtk_tree_sortable_set_sort_func(sortable, COLUMN_RESOLUTION, stream_table_sort_func,
  	                                GINT_TO_POINTER(COLUMN_RESOLUTION), NULL);
 	gtk_tree_view_column_set_sort_column_id(col_resolution, COLUMN_RESOLUTION);
+	gtk_tree_sortable_set_sort_func(sortable, COLUMN_FILENAME, stream_table_sort_func,
+ 	                                GINT_TO_POINTER(COLUMN_FILENAME), NULL);
+	gtk_tree_view_column_set_sort_column_id(col_filename, COLUMN_FILENAME);
 
 	gtk_tree_view_set_model(GTK_TREE_VIEW(view), GTK_TREE_MODEL(data));
 	g_object_unref(data);
@@ -1536,11 +1547,12 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 	long stream_offset = 0;
 	i = 0;
 	while (1) {
-		if (i++ > 5000) {
+/*		if (i++ > 5000) {
 			displaywindow_error(dw,
 			  "The maximum supported number of entries is 5000. Stopped loading the stream.");
 			break;
 		}
+*/
 
 		struct image image;
 		image.det = NULL;
