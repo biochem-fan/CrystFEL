@@ -90,18 +90,13 @@ cell_free
 <SUBSECTION>
 cell_get_cartesian
 cell_get_parameters
-cell_get_pointgroup
 cell_get_reciprocal
 cell_get_centering
 cell_get_lattice_type
 cell_get_unique_axis
 <SUBSECTION>
 cell_set_cartesian
-cell_set_cartesian_a
-cell_set_cartesian_b
-cell_set_cartesian_c
 cell_set_parameters
-cell_set_pointgroup
 cell_set_reciprocal
 cell_set_centering
 cell_set_lattice_type
@@ -312,6 +307,7 @@ IntegerMatrix
 <SUBSECTION>
 intmat_new
 intmat_copy
+intmat_identity
 intmat_free
 <SUBSECTION>
 intmat_get
@@ -381,14 +377,6 @@ free_dim_structure_entry
 </SECTION>
 
 <SECTION>
-<FILE>beam-params</FILE>
-beam_params
-get_beam_parameters
-fill_in_beam_parameters
-free_beam_parameters
-</SECTION>
-
-<SECTION>
 <FILE>crystal</FILE>
 </SECTION>
 
@@ -450,7 +438,6 @@ select_intersections
 update_partialities
 update_partialities_2
 polarisation_correction
-LORENTZ_SCALE
 </SECTION>
 
 <SECTION>

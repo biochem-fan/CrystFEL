@@ -46,23 +46,18 @@ extern "C" {
 
 /**
  * PartialityModel:
- * @PMODEL_SPHERE : Intersection of sphere with excited volume of reciprocal
- *   space.
  * @PMODEL_UNITY : Set all all partialities and Lorentz factors to 1.
- * @PMODEL_GAUSSIAN : Gaussian profiles in 3D
- * @PMODEL_THIN : Thin Ewald sphere intersecting sphere
  * @PMODEL_SCSPHERE : Sphere model with source coverage factor included
+ * @PMODEL_SCGAUSSIAN : Gaussian model with source coverage factor included
  *
  * A %PartialityModel describes a geometrical model which can be used to
  * calculate spot partialities and Lorentz correction factors.
  **/
 typedef enum {
 
-	PMODEL_SPHERE,
 	PMODEL_UNITY,
-	PMODEL_GAUSSIAN,
-	PMODEL_THIN,
 	PMODEL_SCSPHERE,
+	PMODEL_SCGAUSSIAN,
 
 } PartialityModel;
 
@@ -79,7 +74,8 @@ extern void update_partialities_2(Crystal *cryst, PartialityModel pmodel,
 extern void polarisation_correction(RefList *list, UnitCell *cell,
                                     struct image *image);
 
-#define LORENTZ_SCALE (0.01e9)
+extern double sphere_fraction(double rlow, double rhigh, double pr);
+extern double gaussian_fraction(double rlow, double rhigh, double pr);
 
 #ifdef __cplusplus
 }

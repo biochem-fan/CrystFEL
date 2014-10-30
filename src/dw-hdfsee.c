@@ -8,7 +8,7 @@
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
- *   2009-2013 Thomas White <taw@physics.org>
+ *   2009-2014 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *   2014      Takanori Nakane
  *   2012      Richard Kirian
@@ -1055,11 +1055,10 @@ static void load_features_from_file(struct image *image, const char *filename)
 	do {
 		char line[1024];
 		float intensity, sigma, fs, ss;
-		float add_fs, add_ss;
 		char phs[1024];
 		char pn[32];
 		int r;
-		float cts;
+		float cts, d;
 		signed int h, k, l;
 		struct panel *p = NULL;
 
@@ -1067,31 +1066,83 @@ static void load_features_from_file(struct image *image, const char *filename)
 		if ( rval == NULL ) continue;
 		chomp(line);
 
-		/* Try long format (from stream) */
 		r = sscanf(line, "%i %i %i %f %s %f %f %f %f %s",
-				   &h, &k, &l, &intensity, phs, &sigma, &cts, &fs, &ss, pn);
+		                   &h, &k, &l, &intensity, phs, &sigma, &cts,
+		                   &fs, &ss, pn);
 
 		if ( r == 10 ) {
+
+			/* Stream reflection list format 2.3 */
 			char name[32];
 			snprintf(name, 31, "%i %i %i", h, k, l);
-
 			p = find_panel_by_name(image->det, pn);
 
-			add_fs = fs-p->orig_min_fs+p->min_fs;
-			add_ss = ss-p->orig_min_ss+p->min_ss;
-			image_add_feature(image->features, add_fs, add_ss, image, 1.0,
-			                  strdup(name));
+			if ( p == NULL ) {
+
+				ERROR("Unable to find panel %s "
+				      "(no geometry file given?)\n", pn);
+
+			} else {
+
+				/* Convert coordinates to match rearranged
+				 * panels in memory */
+				fs = fs-p->orig_min_fs+p->min_fs;
+				ss = ss-p->orig_min_ss+p->min_ss;
+
+			}
+
+			image_add_feature(image->features, fs, ss,
+			                  image, 1.0, strdup(name));
 			continue;
+
+		} else if ( r == 9 ) {
+
+			/* Stream reflection list format 2.2 or 2.1 */
+			char name[32];
+
+			snprintf(name, 31, "%i %i %i", h, k, l);
+
+			p = find_orig_panel(image->det, fs, ss);
+
+			if ( p == NULL ) {
+				ERROR("Unable to find panel for %s "
+				      "(no geometry file given?)\n", name);
+			} else {
+
+				/* Convert coordinates to match rearranged
+				 * panels in memory */
+				fs = fs - p->orig_min_fs + p->min_fs;
+				ss = ss - p->orig_min_ss + p->min_ss;
+
+			}
+
+			image_add_feature(image->features, fs, ss,
+			                  image, 1.0, strdup(name));
+			continue;
+
 		}
 
-		r = sscanf(line, "%f %f %s", &fs, &ss, pn);
-		if ( r != 3 ) continue;
+
+		/* Try long peak format from stream */
+		r = sscanf(line, "%f %f %f %f %s", &fs, &ss, &d,
+		           &intensity, pn);
+		if ( r != 5 ) continue;
 
 		p = find_panel_by_name(image->det, pn);
+		if ( p == NULL ) {
+			ERROR("Unable to find panel %s "
+			      "(no geometry file given?)\n", pn);
+		} else {
 
-		add_fs = fs-p->orig_min_fs+p->min_fs;
-		add_ss = ss-p->orig_min_ss+p->min_ss;
-		image_add_feature(image->features, add_fs, add_ss, image, 1.0, "peak");
+			/* Convert coordinates to match rearranged panels in
+			 * memory */
+			fs = fs - p->orig_min_fs + p->min_fs;
+			ss = ss - p->orig_min_ss + p->min_ss;
+
+		}
+
+		image_add_feature(image->features, fs, ss, image, 1.0, "peak");
+
 
 	} while ( rval != NULL );
 
@@ -2800,7 +2851,7 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
                                   int noisefilter, int calibmode, int colscale,
                                   const char *element,
                                   struct detector *det_geom,
-                                  const char *beam,
+                                  struct beam_params *beam,
                                   int show_rings, double *ring_radii,
                                   int n_rings, double ring_size,
                                   int median_filter)
@@ -2850,11 +2901,10 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 	dw->curr_event = 0;
 	dw->ev_list = NULL;
 
-	if ( beam != NULL ) {
-		dw->image->beam = get_beam_parameters(beam);
-	}
-
 	dw->image->det = det_geom;
+	dw->image->beam = beam;
+	dw->image->lambda = 0.0;
+	dw->image->filename = filename;
 
 	// Surprisingly, hdfile_open succeeds with a stream file and ends up with SEGV!
 	// Thus, we must test stream first
@@ -2868,7 +2918,6 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 		// check multi-event mode
 		if ( dw->image->det != NULL && ( dw->image->det->path_dim != 0 ||
 	        	                         dw->image->det->dim_dim != 0  )) {
-
 			dw->multi_event = 1;
 
 			dw->ev_list = fill_event_list(dw->hdfile, dw->image->det);

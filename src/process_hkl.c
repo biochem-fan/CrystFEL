@@ -67,6 +67,7 @@ static void show_help(const char *s)
 "  -i, --input=<filename>    Specify input filename (\"-\" for stdin).\n"
 "  -o, --output=<filename>   Specify output filename for merged intensities\n"
 "                             Default: processed.hkl).\n"
+"      --stat=<filename>     Specify output filename for merging statistics.\n"
 "  -y, --symmetry=<sym>      Merge according to point group <sym>.\n"
 "\n"
 "      --start-after=<n>     Skip <n> crystals at the start of the stream.\n"
@@ -83,6 +84,7 @@ static void show_help(const char *s)
 "                             reflection appears in the output.  Default: 2\n"
 "      --min-snr=<n>         Require individual intensity measurements to\n"
 "                             have I > n * sigma(I).  Default: -infinity.\n"
+"      --min-cc=<n>          Reject frames with CC less than n. Default: infinity.\n"
 "      --max-adu=<n>         Maximum peak value.  Default: infinity.\n"
 "      --min-res=<n>         Merge only crystals which diffract above <n> A.\n"
 "      --push-res=<n>        Integrate higher than apparent resolution cutoff.\n"
@@ -180,6 +182,59 @@ static double scale_intensities(RefList *reference, RefList *new,
 }
 
 
+static double cc_intensities(RefList *reference, RefList *new,
+                             const SymOpList *sym)
+{
+	/* "x" is "reference" */
+	float s_xy = 0.0;
+	float s_x = 0.0;
+	float s_y = 0.0;
+	float s_x2 = 0.0;
+	float s_y2 = 0.0;
+	int n = 0;
+	float t1, t2;
+
+	Reflection *refl;
+	RefListIterator *iter;
+
+	for ( refl = first_refl(new, &iter);
+	      refl != NULL;
+	      refl = next_refl(refl, iter) )
+	{
+
+		double i1, i2;
+		signed int hu, ku, lu;
+		signed int h, k, l;
+		Reflection *reference_version;
+
+		get_indices(refl, &h, &k, &l);
+		get_asymm(sym, h, k, l, &hu, &ku, &lu);
+
+		reference_version = find_refl(reference, hu, ku, lu);
+		if ( reference_version == NULL ) continue;
+
+		i1 = get_intensity(reference_version);
+		i2 = get_intensity(refl);
+
+
+		s_xy += i1 * i2;
+		s_x += i1;
+		s_y += i2;
+		s_x2 += i1 * i1;
+		s_y2 += i2 * i2;
+		n++;
+
+	}
+
+	t1 = s_x2 - s_x*s_x / n;
+	t2 = s_y2 - s_y*s_y / n;
+
+	if ( (t1 <= 0.0) || (t2 <= 0.0) ) return 0.0;
+
+	return (s_xy - s_x*s_y/n) / sqrt(t1*t2);
+}
+
+
 static double *check_hist_size(int n, double *hist_vals)
 {
 	int ns;
@@ -203,25 +258,38 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
                          double **hist_vals, signed int hist_h,
                          signed int hist_k, signed int hist_l, int *hist_n,
                          int config_nopolar, double min_snr, double max_adu,
-                         double push_res)
+                         double push_res, double min_cc, int do_scale,
+                         FILE *stat)
 {
 	Reflection *refl;
 	RefListIterator *iter;
-	double scale;
+	RefList *new_refl;
+	double scale, cc;
+
+	new_refl = crystal_get_reflections(cr);
 
 	/* First, correct for polarisation */
 	if ( !config_nopolar ) {
-		polarisation_correction(crystal_get_reflections(cr),
-		                        crystal_get_cell(cr), image);
+		polarisation_correction(new_refl, crystal_get_cell(cr), image);
 	}
 
 	if ( reference != NULL ) {
-		scale = scale_intensities(reference,
-		                          crystal_get_reflections(cr), sym);
+		if ( do_scale ) {
+			scale = scale_intensities(reference, new_refl, sym);
+		} else {
+			scale = 1.0;
+		}
+		cc = cc_intensities(reference, new_refl, sym);
+		if ( cc < min_cc ) return 1;
+		if ( isnan(scale) ) return 1;
+		if ( scale <= 0.0 ) return 1;
+		if ( stat != NULL ) {
+			fprintf(stat, "%s %f %f\n", image->filename, scale, cc);
+		}
+
 	} else {
 		scale = 1.0;
 	}
-	if ( isnan(scale) ) return 1;
 
 	for ( refl = first_refl(crystal_get_reflections(cr), &iter);
 	      refl != NULL;
@@ -319,7 +387,7 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
                      int *hist_i, int config_nopolar, int min_measurements,
                      double min_snr, double max_adu,
                      int start_after, int stop_after, double min_res,
-                     double push_res)
+                     double push_res, double min_cc, int do_scale, char *stat_output)
 {
 	int rval;
 	int n_images = 0;
@@ -328,6 +396,15 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 	Reflection *refl;
 	RefListIterator *iter;
 	int n_crystals_seen = 0;
+	FILE *stat = NULL;
+
+	if ( stat_output != NULL ) {
+		stat = fopen(stat_output, "w");
+		if ( stat == NULL ) {
+			ERROR("Failed to open statistics output file %s\n",
+			      stat_output);
+		}
+	}
 
 	do {
 
@@ -359,7 +436,7 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 			r = merge_crystal(model, &image, cr, reference, sym,
 			                  hist_vals, hist_h, hist_k, hist_l,
 			                  hist_i, config_nopolar, min_snr,
-			                  max_adu, push_res);
+			                  max_adu, push_res, min_cc, do_scale, stat);
 
 			if ( r == 0 ) n_crystals_used++;
 
@@ -398,6 +475,10 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 		set_esd_intensity(refl, sqrt(var)/sqrt(red));
 	}
 
+	if ( stat != NULL ) {
+		fclose(stat);
+	}
+
 	return 0;
 }
 
@@ -407,6 +488,7 @@ int main(int argc, char *argv[])
 	int c;
 	char *filename = NULL;
 	char *output = NULL;
+	char *stat_output = NULL;
 	Stream *st;
 	RefList *model;
 	int config_scale = 0;
@@ -430,6 +512,8 @@ int main(int argc, char *argv[])
 	double max_adu = +INFINITY;
 	double min_res = 0.0;
 	double push_res = +INFINITY;
+	double min_cc = -INFINITY;
+	int twopass = 0;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -451,6 +535,8 @@ int main(int argc, char *argv[])
 		{"push-res",           1, NULL,                6},
 		{"res-push",           1, NULL,                6}, /* compat */
 		{"version",            0, NULL,                7},
+		{"min-cc",             1, NULL,                8},
+		{"stat",               1, NULL,                9},
 		{0, 0, NULL, 0}
 	};
 
@@ -561,6 +647,21 @@ int main(int argc, char *argv[])
 			case '?' :
 			break;
 
+			case 8 :
+			errno = 0;
+			min_cc = strtod(optarg, &rval);
+			if ( *rval != '\0' ) {
+				ERROR("Invalid value for --min-cc.\n");
+				return 1;
+			}
+			twopass = 1;
+			break;
+
+			case 9 :
+			stat_output = strdup(optarg);
+			twopass = 1;
+			break;
+
 			case 0 :
 			break;
 
@@ -636,17 +737,21 @@ int main(int argc, char *argv[])
 
 	}
 
+	/* Need to do a second pass if we are scaling */
+	if ( config_scale ) twopass = 1;
+
 	hist_i = 0;
 	r = merge_all(st, model, NULL, sym, &hist_vals, hist_h, hist_k, hist_l,
 	              &hist_i, config_nopolar, min_measurements, min_snr,
-	              max_adu, start_after, stop_after, min_res, push_res);
+	              max_adu, start_after, stop_after, min_res, push_res,
+	              min_cc, config_scale, stat_output);
 	fprintf(stderr, "\n");
 	if ( r ) {
 		ERROR("Error while reading stream.\n");
 		return 1;
 	}
 
-	if ( config_scale ) {
+	if ( twopass ) {
 
 		RefList *reference;
 
@@ -659,20 +764,23 @@ int main(int argc, char *argv[])
 
 			int r;
 
-			STATUS("Extra pass for scaling...\n");
+			STATUS("Second pass for scaling and/or CCs...\n");
 
 			reference = model;
 			model = reflist_new();
 
-			free(hist_vals);
-			hist_vals = malloc(1*sizeof(double));
-			hist_i = 0;
+			if ( hist_vals != NULL ) {
+				free(hist_vals);
+				hist_vals = malloc(1*sizeof(double));
+				hist_i = 0;
+			}
 
-			r = merge_all(st, model, reference, sym,
-				     &hist_vals, hist_h, hist_k, hist_l, &hist_i,
-				     config_nopolar, min_measurements, min_snr,
-				     max_adu, start_after, stop_after, min_res,
-				     push_res);
+			r = merge_all(st, model, reference, sym, &hist_vals,
+			              hist_h, hist_k, hist_l, &hist_i,
+				      config_nopolar, min_measurements, min_snr,
+				      max_adu, start_after, stop_after, min_res,
+				      push_res, min_cc, config_scale,
+				      stat_output);
 			fprintf(stderr, "\n");
 			if ( r ) {
 				ERROR("Error while reading stream.\n");
@@ -704,6 +812,7 @@ int main(int argc, char *argv[])
 	reflist_free(model);
 	free(output);
 	free(filename);
+	free(stat_output);
 
 	return 0;
 }

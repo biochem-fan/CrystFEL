@@ -47,7 +47,6 @@
 #include "utils.h"
 #include "reflist-utils.h"
 #include "symmetry.h"
-#include "beam-parameters.h"
 #include "geometry.h"
 #include "stream.h"
 #include "thread-pool.h"
@@ -225,7 +224,6 @@ static void show_help(const char *s)
 " -o, --output=<file>      Write partials in stream format to <file>.\n"
 "     --images=<prefix>    Write images to <prefix>NNN.h5.\n"
 " -g. --geometry=<file>    Get detector geometry from file.\n"
-" -b, --beam=<file>        Get beam parameters from file\n"
 " -p, --pdb=<file>         PDB file from which to get the unit cell.\n"
 "\n"
 " -y, --symmetry=<sym>     Symmetry of the input reflection list.\n"
@@ -238,6 +236,11 @@ static void show_help(const char *s)
 "                           generated full intensities, if not using -i.\n"
 "     --noise-stddev=<val> Set the standard deviation of the noise.\n"
 "     --background=<val>   Background level in photons.  Default 3000.\n"
+"     --beam-divergence    Beam divergence in radians. Default 1 mrad.\n"
+"     --beam-bandwidth     Beam bandwidth as a fraction. Default 1%%.\n"
+"     --profile-radius     Reciprocal space reflection profile radius in m^-1.\n"
+"                           Default 0.001e9 m^-1\n"
+"     --photon-energy      Photon energy in eV.  Default 9000.\n"
 "\n"
 );
 }
@@ -260,6 +263,7 @@ struct queue_args
 	double full_stddev;
 	double noise_stddev;
 	double background;
+	double profile_radius;
 
 	struct image *template_image;
 	double max_q;
@@ -335,7 +339,7 @@ static void run_job(void *vwargs, int cookie)
 	} while ( osf <= 0.0 );
 	crystal_set_osf(cr, osf);
 	crystal_set_mosaicity(cr, 0.0);
-	crystal_set_profile_radius(cr, wargs->image.beam->profile_radius);
+	crystal_set_profile_radius(cr, qargs->profile_radius);
 
 	/* Set up a random orientation */
 	orientation = random_quaternion(qargs->rngs[cookie]);
@@ -353,7 +357,7 @@ static void run_job(void *vwargs, int cookie)
 		snprintf(wargs->image.filename, 255, "dummy.h5");
 	}
 
-	reflections = find_intersections(&wargs->image, cr, PMODEL_SPHERE);
+	reflections = find_intersections(&wargs->image, cr, PMODEL_SCSPHERE);
 	crystal_set_reflections(cr, reflections);
 
 	for ( i=0; i<NBINS; i++ ) {
@@ -411,11 +415,10 @@ int main(int argc, char *argv[])
 	int c;
 	char *input_file = NULL;
 	char *output_file = NULL;
-	char *beamfile = NULL;
 	char *geomfile = NULL;
 	char *cellfile = NULL;
 	struct detector *det = NULL;
-	struct beam_params *beam = NULL;
+	struct beam_params beam;
 	RefList *full = NULL;
 	char *sym_str = NULL;
 	SymOpList *sym;
@@ -427,26 +430,31 @@ int main(int argc, char *argv[])
 	struct queue_args qargs;
 	struct image image;
 	int n_threads = 1;
-	double cnoise = 0.0;
 	char *rval;
 	int i;
 	FILE *fh;
 	char *phist_file = NULL;
-	double osf_stddev = 2.0;
-	double full_stddev = 1000.0;
-	double noise_stddev = 20.0;
-	double background = 3000.0;
 	gsl_rng *rng_for_seeds;
 	int config_random = 0;
 	char *image_prefix = NULL;
 
+	/* Default simulation parameters */
+	double divergence = 0.001;
+	double bandwidth = 0.01;
+	double profile_radius = 0.001e9;
+	double photon_energy = 9000.0;
+	double osf_stddev = 2.0;
+	double full_stddev = 1000.0;
+	double noise_stddev = 20.0;
+	double background = 3000.0;
+	double cnoise = 0.0;
+
 	/* Long options */
 	const struct option longopts[] = {
 		{"help",               0, NULL,               'h'},
-		{"version",            0, NULL,                8 },
+		{"version",            0, NULL,               'v'},
 		{"output",             1, NULL,               'o'},
 		{"input",              1, NULL,               'i'},
-		{"beam",               1, NULL,               'b'},
 		{"pdb",                1, NULL,               'p'},
 		{"geometry",           1, NULL,               'g'},
 		{"symmetry",           1, NULL,               'y'},
@@ -459,6 +467,10 @@ int main(int argc, char *argv[])
 		{"noise-stddev",       1, NULL,                5},
 		{"images",             1, NULL,                6},
 		{"background",         1, NULL,                7},
+		{"beam-divergence",    1, NULL,                8},
+		{"beam-bandwidth",     1, NULL,                9},
+		{"profile-radius",     1, NULL,               10},
+		{"photon-energy",      1, NULL,               11},
 
 		{"really-random",      0, &config_random,      1},
 
@@ -466,7 +478,7 @@ int main(int argc, char *argv[])
 	};
 
 	/* Short options */
-	while ((c = getopt_long(argc, argv, "hi:o:b:p:g:y:n:r:j:c:",
+	while ((c = getopt_long(argc, argv, "hi:o:p:g:y:n:r:j:c:v",
 	                        longopts, NULL)) != -1)
 	{
 		switch (c) {
@@ -475,7 +487,7 @@ int main(int argc, char *argv[])
 			show_help(argv[0]);
 			return 0;
 
-			case 8 :
+			case 'v' :
 			printf("CrystFEL: " CRYSTFEL_VERSIONSTRING "\n");
 			printf(CRYSTFEL_BOILERPLATE"\n");
 			return 0;
@@ -486,10 +498,6 @@ int main(int argc, char *argv[])
 
 			case 'o' :
 			output_file = strdup(optarg);
-			break;
-
-			case 'b' :
-			beamfile = strdup(optarg);
 			break;
 
 			case 'p' :
@@ -578,8 +586,55 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 			if ( background < 0.0 ) {
-				ERROR("Invalid background level.");
-				ERROR(" (must be positive).\n");
+				ERROR("Background level must be positive.\n");
+				return 1;
+			}
+			break;
+
+			case 8 :
+			divergence = strtod(optarg, &rval);
+			if ( *rval != '\0' ) {
+				ERROR("Invalid beam divergence.\n");
+				return 1;
+			}
+			if ( divergence < 0.0 ) {
+				ERROR("Beam divergence must be positive.\n");
+				return 1;
+			}
+			break;
+
+			case 9 :
+			bandwidth = strtod(optarg, &rval);
+			if ( *rval != '\0' ) {
+				ERROR("Invalid beam bandwidth.\n");
+				return 1;
+			}
+			if ( bandwidth < 0.0 ) {
+				ERROR("Beam bandwidth must be positive.\n");
+				return 1;
+			}
+			break;
+
+			case 10 :
+			profile_radius = strtod(optarg, &rval);
+			if ( *rval != '\0' ) {
+				ERROR("Invalid profile radius.\n");
+				return 1;
+			}
+			if ( divergence < 0.0 ) {
+				ERROR("Profile radius must be positive.\n");
+				return 1;
+			}
+			break;
+
+			case 11 :
+			photon_energy = strtod(optarg, &rval);
+			if ( *rval != '\0' ) {
+				ERROR("Invalid photon energy.\n");
+				return 1;
+			}
+			if ( photon_energy < 0.0 ) {
+				ERROR("Photon energy must be positive.\n");
 				return 1;
 			}
 			break;
@@ -607,24 +662,12 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	/* Load beam */
-	if ( beamfile == NULL ) {
-		ERROR("You need to provide a beam parameters file.\n");
-		return 1;
-	}
-	beam = get_beam_parameters(beamfile);
-	if ( beam == NULL ) {
-		ERROR("Failed to load beam parameters from '%s'\n", beamfile);
-		return 1;
-	}
-	free(beamfile);
-
 	/* Load cell */
 	if ( cellfile == NULL ) {
 		ERROR("You need to give a PDB file with the unit cell.\n");
 		return 1;
 	}
-	cell = load_cell_from_pdb(cellfile);
+	cell = load_cell_from_file(cellfile);
 	if ( cell == NULL ) {
 		ERROR("Failed to get cell from '%s'\n", cellfile);
 		return 1;
@@ -642,7 +685,7 @@ int main(int argc, char *argv[])
 		ERROR("You need to give a geometry file.\n");
 		return 1;
 	}
-	det = get_detector_geometry(geomfile);
+	det = get_detector_geometry(geomfile, &beam);
 	if ( det == NULL ) {
 		ERROR("Failed to read geometry from '%s'\n", geomfile);
 		return 1;
@@ -700,10 +743,9 @@ int main(int argc, char *argv[])
 	image.width = det->max_fs + 1;
 	image.height = det->max_ss + 1;
 
-	image.lambda = ph_en_to_lambda(eV_to_J(beam->photon_energy));
-	image.div = beam->divergence;
-	image.bw = beam->bandwidth;
-	image.beam = beam;
+	image.lambda = ph_en_to_lambda(eV_to_J(photon_energy));
+	image.div = divergence;
+	image.bw = bandwidth;
 	image.filename = "dummy.h5";
 	image.copyme = NULL;
 	image.crystals = NULL;
@@ -712,6 +754,7 @@ int main(int argc, char *argv[])
 	image.num_peaks = 0;
 	image.num_saturated_peaks = 0;
 	image.spectrum_size = 0;
+	image.event = NULL;
 
 	if ( random_intensities ) {
 		full = reflist_new();
@@ -734,6 +777,7 @@ int main(int argc, char *argv[])
 	qargs.background = background;
 	qargs.max_q = largest_q(&image);
 	qargs.image_prefix = image_prefix;
+	qargs.profile_radius = profile_radius;
 
 	qargs.rngs = malloc(n_threads * sizeof(gsl_rng *));
 	if ( qargs.rngs == NULL ) {
@@ -841,7 +885,6 @@ int main(int argc, char *argv[])
 	close_stream(stream);
 	cell_free(cell);
 	free_detector_geometry(det);
-	free(beam);
 	free_symoplist(sym);
 	reflist_free(full);
 	free(save_file);

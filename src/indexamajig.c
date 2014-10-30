@@ -62,7 +62,6 @@
 #include "detector.h"
 #include "filters.h"
 #include "thread-pool.h"
-#include "beam-parameters.h"
 #include "geometry.h"
 #include "stream.h"
 #include "reflist-utils.h"
@@ -90,11 +89,8 @@ static void show_help(const char *s)
 "                           methods separated by commas.\n"
 "                           See 'man indexamajig' for details.\n"
 " -g. --geometry=<file>    Get detector geometry from file.\n"
-" -b, --beam=<file>        Get beam parameters from file (provides nominal\n"
-"                           wavelength value if no per-shot value is found in\n"
-"                           the HDF5 files.\n"
-" -p, --pdb=<file>         PDB file from which to get the unit cell to match.\n"
-"                           Default: 'molecule.pdb'.\n"
+" -p, --pdb=<file>         File (PDB or CrystFEL unit cell format) from which\n"
+"                           to get the unit cell.  Default: 'molecule.pdb'.\n"
 "     --basename           Remove the directory parts of the filenames.\n"
 " -x, --prefix=<p>         Prefix filenames from input file with <p>.\n"
 "     --peaks=<method>     Use 'method' for finding peaks.  Choose from:\n"
@@ -187,7 +183,7 @@ int main(int argc, char *argv[])
 	IndexingMethod *indm;
 	IndexingPrivate **ipriv;
 	char *indm_str = NULL;
-	char *pdb = NULL;
+	char *cellfile = NULL;
 	char *prefix = NULL;
 	char *speaks = NULL;
 	char *toler = NULL;
@@ -199,6 +195,8 @@ int main(int argc, char *argv[])
 	char *tempdir = NULL;
 	char *int_diag = NULL;
 	char *geom_filename = NULL;
+	struct beam_params beam;
+	int have_push_res = 0;
 
 	/* Defaults */
 	iargs.cell = NULL;
@@ -215,7 +213,7 @@ int main(int argc, char *argv[])
 	iargs.check_hdf5_snr = 0;
 	iargs.det = NULL;
 	iargs.peaks = PEAK_ZAEF;
-	iargs.beam = NULL;
+	iargs.beam = &beam;
 	iargs.element = NULL;
 	iargs.hdf5_peak_path = strdup("/processing/hitfinder/peakinfo");
 	iargs.copyme = NULL;
@@ -246,18 +244,17 @@ int main(int argc, char *argv[])
 
 		/* Options with long and short versions */
 		{"help",               0, NULL,               'h'},
+		{"version",            0, NULL,               'v'},
 		{"input",              1, NULL,               'i'},
 		{"output",             1, NULL,               'o'},
 		{"indexing",           1, NULL,               'z'},
 		{"geometry",           1, NULL,               'g'},
-		{"beam",               1, NULL,               'b'},
 		{"pdb",                1, NULL,               'p'},
 		{"prefix",             1, NULL,               'x'},
 		{"threshold",          1, NULL,               't'},
 		{"image",              1, NULL,               'e'},
 
 		/* Long-only options with no arguments */
-		{"version",            0, NULL,                     99},
 		{"filter-noise",       0, &iargs.noisefilter,        1},
 		{"no-check-prefix",    0, &config_checkprefix,       0},
 		{"basename",           0, &config_basename,          1},
@@ -300,7 +297,7 @@ int main(int argc, char *argv[])
 	};
 
 	/* Short options */
-	while ((c = getopt_long(argc, argv, "hi:o:z:p:x:j:g:t:b:e:",
+	while ((c = getopt_long(argc, argv, "hi:o:z:p:x:j:g:t:e:v",
 	                        longopts, NULL)) != -1)
 	{
 		switch (c) {
@@ -309,7 +306,7 @@ int main(int argc, char *argv[])
 			show_help(argv[0]);
 			return 0;
 
-			case 99 :
+			case 'v' :
 			printf("CrystFEL: " CRYSTFEL_VERSIONSTRING "\n");
 			printf(CRYSTFEL_BOILERPLATE"\n");
 			return 0;
@@ -327,7 +324,7 @@ int main(int argc, char *argv[])
 			break;
 
 			case 'p' :
-			pdb = strdup(optarg);
+			cellfile = strdup(optarg);
 			break;
 
 			case 'x' :
@@ -340,25 +337,10 @@ int main(int argc, char *argv[])
 
 			case 'g' :
 			geom_filename = optarg;
-			iargs.det = get_detector_geometry(optarg);
-			if ( iargs.det == NULL ) {
-				ERROR("Failed to read detector geometry from "
-				      "'%s'\n", optarg);
-				return 1;
-			}
 			break;
 
 			case 't' :
 			iargs.threshold = strtof(optarg, NULL);
-			break;
-
-			case 'b' :
-			iargs.beam = get_beam_parameters(optarg);
-			if ( iargs.beam == NULL ) {
-				ERROR("Failed to load beam parameters"
-				      " from '%s'\n", optarg);
-				return 1;
-			}
 			break;
 
 			case 'e' :
@@ -439,6 +421,7 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 			iargs.push_res *= 1e9;  /* nm^-1 -> m^-1 */
+			have_push_res = 1;
 			break;
 
 			case 20 :
@@ -514,6 +497,13 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	iargs.det = get_detector_geometry(geom_filename, iargs.beam);
+	if ( iargs.det == NULL ) {
+		ERROR("Failed to read detector geometry from  '%s'\n",
+		      geom_filename);
+		return 1;
+	}
+
 	if ( indm_str == NULL ) {
 
 		STATUS("You didn't specify an indexing method, so I  won't try "
@@ -546,6 +536,11 @@ int main(int argc, char *argv[])
 	if ( integrate_saturated ) {
 		/* Option provided for backwards compatibility */
 		iargs.int_meth |= INTEGRATION_SATURATED;
+	}
+
+	if ( have_push_res && !(iargs.int_meth & INTEGRATION_RESCUT) ) {
+		ERROR("WARNING: You used --push-res, but not -rescut, "
+		      "therefore --push-res will have no effect.\n");
 	}
 
 	if ( toler != NULL ) {
@@ -598,21 +593,15 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if ( iargs.beam == NULL ) {
-		ERROR("You need to provide a beam parameters file (please read"
-		      " the manual for more details).\n");
-		return 1;
-	}
-
 	add_geom_beam_stuff_to_copy_hdf5(iargs.copyme, iargs.det, iargs.beam);
 
-	if ( pdb != NULL ) {
-		iargs.cell = load_cell_from_pdb(pdb);
+	if ( cellfile != NULL ) {
+		iargs.cell = load_cell_from_file(cellfile);
 		if ( iargs.cell == NULL ) {
-			ERROR("Couldn't read unit cell (from %s)\n", pdb);
+			ERROR("Couldn't read unit cell (from %s)\n", cellfile);
 			return 1;
 		}
-		free(pdb);
+		free(cellfile);
 		STATUS("This is what I understood your unit cell to be:\n");
 		cell_print(iargs.cell);
 	} else {
@@ -678,7 +667,7 @@ int main(int argc, char *argv[])
 	/* Prepare the indexer */
 	if ( indm != NULL ) {
 		ipriv = prepare_indexing(indm, iargs.cell, iargs.det,
-		                         iargs.beam, iargs.tols);
+		                         iargs.tols);
 		if ( ipriv == NULL ) {
 			ERROR("Failed to prepare indexing.\n");
 			return 1;
@@ -698,6 +687,8 @@ int main(int argc, char *argv[])
 	free(prefix);
 	free(tempdir);
 	free_detector_geometry(iargs.det);
+	close_stream(st);
+	cleanup_indexing(indm, ipriv);
 
 	return 0;
 }

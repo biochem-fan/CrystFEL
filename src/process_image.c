@@ -34,6 +34,8 @@
 #include <stdlib.h>
 #include <hdf5.h>
 #include <gsl/gsl_errno.h>
+#include <gsl/gsl_statistics_double.h>
+#include <gsl/gsl_sort.h>
 #include <unistd.h>
 
 #include "utils.h"
@@ -43,7 +45,6 @@
 #include "detector.h"
 #include "filters.h"
 #include "thread-pool.h"
-#include "beam-parameters.h"
 #include "geometry.h"
 #include "stream.h"
 #include "reflist-utils.h"
@@ -51,8 +52,68 @@
 #include "integration.h"
 
 
+static int cmpd2(const void *av, const void *bv)
+{
+	double *ap, *bp;
+	double a, b;
+
+	ap = (double *)av;
+	bp = (double *)bv;
+
+	a = ap[1];
+	b = bp[1];
+
+	if ( fabs(a) < fabs(b) ) return -1;
+	return 1;
+}
+
+
+static void refine_radius(Crystal *cr)
+{
+	Reflection *refl;
+	RefListIterator *iter;
+	double vals[num_reflections(crystal_get_reflections(cr))*2];
+	int n = 0;
+	int i;
+	double ti = 0.0;  /* Total intensity */
+
+	for ( refl = first_refl(crystal_get_reflections(cr), &iter);
+	      refl != NULL;
+	      refl = next_refl(refl, iter) )
+	{
+		double i = get_intensity(refl);
+		double rlow, rhigh, p;
+
+		get_partial(refl, &rlow, &rhigh, &p);
+
+		vals[(2*n)+0] = i;
+		vals[(2*n)+1] = fabs((rhigh+rlow)/2.0);
+		n++;
+
+	}
+
+	/* Sort in ascending order of absolute "deviation from Bragg" */
+	qsort(vals, n, sizeof(double)*2, cmpd2);
+
+	/* Add up all the intensity and calculate cumulative intensity as a
+	 * function of absolute "deviation from Bragg" */
+	for ( i=0; i<n-1; i++ ) {
+		ti += vals[2*i];
+		vals[2*i] = ti;
+	}
+
+	/* Find the cutoff where we get 67% of the intensity */
+	for ( i=0; i<n-1; i++ ) {
+		if ( vals[2*i] > 0.67*ti ) break;
+	}
+
+	crystal_set_profile_radius(cr, fabs(vals[2*i+1]));
+}
+
+
 void process_image(const struct index_args *iargs, struct pattern_args *pargs,
-                   Stream *st, int cookie, const char *tmpdir, int results_pipe)
+                   Stream *st, int cookie, const char *tmpdir, int results_pipe,
+                   int serial)
 {
 	float *data_for_measurement;
 	size_t data_size;
@@ -74,6 +135,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	image.det = iargs->det;
 	image.crystals = NULL;
 	image.n_crystals = 0;
+	image.serial = serial;
 
 	hdfile = hdfile_open(image.filename);
 	if ( hdfile == NULL ) {
@@ -102,19 +164,14 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 
 	mark_resolution_range_as_bad(&image, iargs->highres, +INFINITY);
 
-	hdfile = hdfile_open(image.filename);
-	if ( hdfile == NULL ) {
-		ERROR("Couldn't open file %s.\n", image.filename);
-		return;
-	}
-
 	switch ( iargs->peaks ) {
 
 		case PEAK_HDF5:
 		/* Get peaks from HDF5 */
 
 		if ( !single_panel_data_source(iargs->det, iargs->element) ) {
-			ERROR("Peaks from HDF5 file not supported with multiple panel data sources.\n");
+			ERROR("Peaks from HDF5 file not supported with "
+			      "multiple panel data sources.\n");
 		}
 
 		if ( get_peaks(&image, hdfile, iargs->hdf5_peak_path) ) {
@@ -161,6 +218,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		hdfile_close(hdfile);
 		return;
 	}
+	free(rn);
 
 	pargs->n_crystals = image.n_crystals;
 	for ( i=0; i<image.n_crystals; i++ ) {
@@ -168,20 +226,31 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	}
 
 	/* Default parameters */
-	image.div = image.beam->divergence;
-	image.bw = image.beam->bandwidth;
+	image.div = 0.0;
+	image.bw = 0.00000001;
 	for ( i=0; i<image.n_crystals; i++ ) {
-		crystal_set_profile_radius(image.crystals[i],
-		                           image.beam->profile_radius);
+		crystal_set_profile_radius(image.crystals[i], 0.01e9);
 		crystal_set_mosaicity(image.crystals[i], 0.0);  /* radians */
 	}
 
 	/* Integrate all the crystals at once - need all the crystals so that
 	 * overlaps can be detected. */
-	integrate_all_4(&image, iargs->int_meth, PMODEL_SPHERE, iargs->push_res,
+	integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE, iargs->push_res,
 	                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
 	                iargs->int_diag, iargs->int_diag_h,
 	                iargs->int_diag_k, iargs->int_diag_l, results_pipe);
+
+	for ( i=0; i<image.n_crystals; i++ ) {
+		refine_radius(image.crystals[i]);
+		reflist_free(crystal_get_reflections(image.crystals[i]));
+	}
+
+	integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE,
+		                iargs->push_res,
+			        iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
+			        iargs->int_diag, iargs->int_diag_h,
+			        iargs->int_diag_k, iargs->int_diag_l,
+			        results_pipe);
 
 	write_chunk(st, &image, hdfile,
 	            iargs->stream_peaks, iargs->stream_refls,

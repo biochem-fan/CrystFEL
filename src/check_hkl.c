@@ -57,7 +57,7 @@ static void show_help(const char *s)
 "  -h, --help                 Display this help message.\n"
 "      --version              Print CrystFEL version number and exit.\n"
 "  -y, --symmetry=<sym>       The symmetry of the input file.\n"
-"  -p, --pdb=<filename>       PDB file to use.\n"
+"  -p, --pdb=<filename>       Unit cell file to use (PDB or CrystFEL format).\n"
 "      --rmin=<res>           Low resolution cutoff (1/d in m^-1).\n"
 "      --rmax=<res>           High resolution cutoff (1/d in m^-1).\n"
 "      --lowres=<n>           Low resolution cutoff in (d in A).\n"
@@ -444,7 +444,7 @@ static void plot_shells(RefList *list, UnitCell *cell, const SymOpList *sym,
 
 	fh = fopen(shell_file, "w");
 	if ( fh == NULL ) {
-		ERROR("Couldn't open 'shells.dat'\n");
+		ERROR("Couldn't open '%s'\n", shell_file);
 		return;
 	}
 
@@ -645,7 +645,7 @@ static void plot_shells(RefList *list, UnitCell *cell, const SymOpList *sym,
 
 	fclose(fh);
 
-	STATUS("Resolution shell information written to shells.dat.\n");
+	STATUS("Resolution shell information written to %s.\n", shell_file);
 
 	free(possible);
 	free(measurements);
@@ -692,7 +692,7 @@ int main(int argc, char *argv[])
 	RefList *list;
 	Reflection *refl;
 	RefListIterator *iter;
-	char *pdb = NULL;
+	char *cellfile = NULL;
 	int rej = 0;
 	float rmin_fix = -1.0;
 	float rmax_fix = -1.0;
@@ -751,7 +751,7 @@ int main(int argc, char *argv[])
 			break;
 
 			case 'p' :
-			pdb = strdup(optarg);
+			cellfile = strdup(optarg);
 			break;
 
 			case 0 :
@@ -833,13 +833,12 @@ int main(int argc, char *argv[])
 
 	file = strdup(argv[optind++]);
 
-	if ( pdb == NULL ) {
-		ERROR("You need to provide a PDB file containing"
-		       " the unit cell.\n");
+	if ( cellfile == NULL ) {
+		ERROR("You need to provide a unit cell.\n");
 		return 1;
 	}
-	cell = load_cell_from_pdb(pdb);
-	free(pdb);
+	cell = load_cell_from_file(cellfile);
+	free(cellfile);
 
 	raw_list = read_reflections(file);
 	if ( raw_list == NULL ) {

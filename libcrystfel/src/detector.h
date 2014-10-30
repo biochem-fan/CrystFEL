@@ -42,6 +42,7 @@ struct detector;
 struct panel;
 struct badregion;
 struct detector;
+struct beam_params;
 struct hdfile;
 struct event;
 
@@ -74,10 +75,12 @@ struct panel
 {
 	char     name[1024];  /* Name for this panel */
 
+	/* Position of panel in the data block in memory (see below) */
 	int      min_fs;  /* Smallest FS value considered to be in the panel */
 	int      max_fs;  /* Largest FS value considered to be in this panel */
 	int      min_ss;  /* ... and so on */
 	int      max_ss;
+
 	double   cnx;       /* Location of corner (min_fs,min_ss) in pixels */
 	double   cny;
 	double   coffset;
@@ -104,6 +107,9 @@ struct panel
 	double xss;
 	double yss;
 
+	/* Position of the panel in the data block in the file.  The panels may
+	 * get moved around when the file is loaded (see hdf5_read2()),
+	 * especially if the panels come from different HDF5 elements. */
 	int orig_min_fs;
 	int orig_max_fs;
 	int orig_min_ss;
@@ -180,13 +186,15 @@ extern double get_tt(struct image *image, double xs, double ys, int *err);
 extern int in_bad_region(struct detector *det, double fs, double ss);
 
 extern void record_image(struct image *image, int do_poisson, int background,
-                         gsl_rng *rng);
+                         gsl_rng *rng, double beam_radius, double nphotons);
 
 extern struct panel *find_panel(struct detector *det, double fs, double ss);
-
 extern signed int find_panel_number(struct detector *det, double fs, double ss);
+extern struct panel *find_orig_panel(struct detector *det,
+                                     double fs, double ss);
 
-extern struct detector *get_detector_geometry(const char *filename);
+extern struct detector *get_detector_geometry(const char *filename,
+                                              struct beam_params *beam);
 
 extern void free_detector_geometry(struct detector *det);
 

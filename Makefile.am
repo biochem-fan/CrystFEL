@@ -10,8 +10,7 @@ bin_PROGRAMS = src/pattern_sim src/process_hkl src/get_hkl src/indexamajig \
 noinst_PROGRAMS = tests/list_check tests/integration_check \
                   tests/pr_p_gradient_check tests/symmetry_check \
                   tests/centering_check tests/transformation_check \
-                  tests/cell_check tests/pr_l_gradient_check \
-                  tests/pr_pl_gradient_check tests/ring_check \
+                  tests/cell_check tests/ring_check \
                   tests/prof2d_check tests/ambi_check
 
 MERGE_CHECKS = tests/first_merge_check tests/second_merge_check \
@@ -20,9 +19,7 @@ MERGE_CHECKS = tests/first_merge_check tests/second_merge_check \
 PARTIAL_CHECKS = tests/partialator_merge_check_1 \
                  tests/partialator_merge_check_2 \
                  tests/partialator_merge_check_3 \
-                 tests/pr_p_gradient_check \
-                 tests/pr_l_gradient_check \
-                 tests/pr_pl_gradient_check
+                 tests/pr_p_gradient_check
 
 TESTS = tests/list_check $(MERGE_CHECKS) $(PARTIAL_CHECKS) \
         tests/integration_check \
@@ -117,12 +114,6 @@ tests_ambi_check_SOURCES = tests/ambi_check.c
 tests_pr_p_gradient_check_SOURCES = tests/pr_p_gradient_check.c \
                                   src/post-refinement.c
 
-tests_pr_pl_gradient_check_SOURCES = tests/pr_pl_gradient_check.c \
-                                  src/post-refinement.c
-
-tests_pr_l_gradient_check_SOURCES = tests/pr_l_gradient_check.c \
-                                  src/post-refinement.c
-
 tests_centering_check_SOURCES = tests/centering_check.c
 
 tests_transformation_check_SOURCES = tests/transformation_check.c
@@ -155,14 +146,11 @@ EXTRA_DIST += $(man_MANS)
 
 crystfeldocdir = $(docdir)
 crystfeldoc_DATA = doc/twin-calculator.pdf doc/examples/lcls-dec.geom \
-                   doc/examples/lcls-dec.beam \
                    doc/examples/lcls-june-r0013-r0128.geom \
-                   doc/examples/lcls-june.beam \
                    doc/examples/lcls-xpp-estimate.geom \
-                   doc/examples/lcls-xpp-estimate.beam \
                    doc/examples/simple.geom \
                    doc/examples/cspad-feb2011.geom \
-                   doc/examples/lcls-cxi-9keV.beam
+                   doc/examples/cell-example.cell
 
 EXTRA_DIST += $(crystfeldoc_DATA) doc/twin-calculator.odt \
               doc/reference/libcrystfel/xml/coding-standards.xml
@@ -179,7 +167,8 @@ script_DATA = scripts/alternate-stream scripts/cell-please \
               scripts/split-indexed scripts/stream_grep scripts/zone-axes \
               scripts/Rsplit_surface scripts/Rsplit_surface.py \
               scripts/clean-stream.py scripts/fg-graph scripts/truncate-stream \
-              scripts/gen-sfs-expand scripts/add-beam-params scripts/find-pairs
+              scripts/gen-sfs-expand scripts/add-beam-params \
+              scripts/find-pairs scripts/plot-cc-and-scale.R
 
 EXTRA_DIST += $(script_DATA)
 

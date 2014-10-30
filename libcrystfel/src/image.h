@@ -98,6 +98,15 @@ struct sample
 };
 
 
+struct beam_params
+{
+	double photon_energy;  /* eV per photon */
+	char  *photon_energy_from; /* HDF5 dataset name */
+	double photon_energy_scale;  /* Scale factor for photon energy, if the
+	                              * energy is to be from the HDF5 file */
+};
+
+
 /**
  * image:
  *
@@ -174,6 +183,8 @@ struct image {
 
 	int                     id;   /* ID number of the thread
 	                               * handling this image */
+	int                     serial;  /* Monotonically ascending serial
+	                                  * number for this image */
 
 	struct sample           *spectrum;
 	int                     nsamples; /* Number of wavelengths */

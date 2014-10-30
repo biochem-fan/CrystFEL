@@ -43,7 +43,6 @@
 #include "image.h"
 #include "utils.h"
 #include "detector.h"
-#include "beam-parameters.h"
 #include "hdf5-file.h"
 
 
@@ -324,7 +323,7 @@ double get_tt(struct image *image, double fs, double ss, int *err)
 
 
 void record_image(struct image *image, int do_poisson, int background,
-                  gsl_rng *rng)
+                  gsl_rng *rng, double beam_radius, double nphotons)
 {
 	int x, y;
 	double total_energy, energy_density;
@@ -339,14 +338,14 @@ void record_image(struct image *image, int do_poisson, int background,
 	int n_nan2 = 0;
 
 	/* How many photons are scattered per electron? */
-	area = M_PI*pow(image->beam->beam_radius, 2.0);
-	total_energy = image->beam->fluence * ph_lambda_to_en(image->lambda);
+	area = M_PI*pow(beam_radius, 2.0);
+	total_energy = nphotons * ph_lambda_to_en(image->lambda);
 	energy_density = total_energy / area;
-	ph_per_e = (image->beam->fluence /area) * pow(THOMSON_LENGTH, 2.0);
+	ph_per_e = (nphotons /area) * pow(THOMSON_LENGTH, 2.0);
 	STATUS("Fluence = %8.2e photons, "
 	       "Energy density = %5.3f kJ/cm^2, "
 	       "Total energy = %5.3f microJ\n",
-	       image->beam->fluence, energy_density/1e7, total_energy*1e6);
+	       nphotons, energy_density/1e7, total_energy*1e6);
 
 	for ( x=0; x<image->width; x++ ) {
 	for ( y=0; y<image->height; y++ ) {
@@ -459,6 +458,26 @@ struct panel *find_panel(struct detector *det, double fs, double ss)
 	signed int pn = find_panel_number(det, fs, ss);
 	if ( pn == -1 ) return NULL;
 	return &det->panels[pn];
+}
+
+
+/* Like find_panel(), but uses the original panel bounds, i.e. referring to
+ * what's in the HDF5 file */
+struct panel *find_orig_panel(struct detector *det, double fs, double ss)
+{
+	int p;
+
+	for ( p=0; p<det->n_panels; p++ ) {
+		if ( (fs >= det->panels[p].orig_min_fs)
+		  && (fs < det->panels[p].orig_max_fs+1)
+		  && (ss >= det->panels[p].orig_min_ss)
+		  && (ss < det->panels[p].orig_max_ss+1) )
+		{
+			return &det->panels[p];
+		}
+	}
+
+	return NULL;
 }
 
 
@@ -784,8 +803,8 @@ static int parse_field_bad(struct badregion *panel, const char *key,
 }
 
 
-static void parse_toplevel(struct detector *det, const char *key,
-                           const char *val)
+static void parse_toplevel(struct detector *det, struct beam_params *beam,
+                           const char *key, const char *val)
 {
 	if ( strcmp(key, "mask_bad") == 0 ) {
 
@@ -807,6 +826,29 @@ static void parse_toplevel(struct detector *det, const char *key,
 
 	} else if ( strcmp(key, "coffset") == 0 ) {
 		det->defaults.coffset = atof(val);
+
+	} else if ( strcmp(key, "photon_energy") == 0 ) {
+		if ( beam == NULL ) {
+			ERROR("Geometry file contains a reference to "
+			      "photon_energy, which is inappropriate in this "
+			      "situation.\n");
+		} else if ( strncmp(val, "/", 1) == 0 ) {
+			beam->photon_energy = 0.0;
+			beam->photon_energy_from = strdup(val);
+		} else {
+			beam->photon_energy = atof(val);
+			beam->photon_energy_from = NULL;
+		}
+
+	} else if ( strcmp(key, "photon_energy_scale") == 0 ) {
+		if ( beam == NULL ) {
+			ERROR("Geometry file contains a reference to "
+			      "photon_energy_scale, which is inappropriate in "
+			      "this situation.\n");
+		} else {
+			beam->photon_energy_scale = atof(val);
+		}
+
 	} else if ( parse_field_for_panel(&det->defaults, key, val, det) ) {
 		ERROR("Unrecognised top level field '%s'\n", key);
 	}
@@ -871,7 +913,8 @@ static void find_min_max_d(struct detector *det)
 }
 
 
-struct detector *get_detector_geometry(const char *filename)
+struct detector *get_detector_geometry(const char *filename,
+                                       struct beam_params *beam)
 {
 	FILE *fh;
 	struct detector *det;
@@ -893,6 +936,10 @@ struct detector *get_detector_geometry(const char *filename)
 		fclose(fh);
 		return NULL;
 	}
+
+	beam->photon_energy = -1.0;
+	beam->photon_energy_from = NULL;
+	beam->photon_energy_scale = 1.0;
 
 	det->n_panels = 0;
 	det->panels = NULL;
@@ -971,7 +1018,7 @@ struct detector *get_detector_geometry(const char *filename)
 		n2 = assplode(bits[0], "/\\.", &path, ASSPLODE_NONE);
 		if ( n2 < 2 ) {
 			/* This was a top-level option, not handled above. */
-			parse_toplevel(det, bits[0], bits[2]);
+			parse_toplevel(det, beam, bits[0], bits[2]);
 			for ( i=0; i<n1; i++ ) free(bits[i]);
 			free(bits);
 			for ( i=0; i<n2; i++ ) free(path[i]);
@@ -1030,8 +1077,7 @@ struct detector *get_detector_geometry(const char *filename)
 
 		next_instance = det->panels[i].data;
 
-		while(next_instance)
-		{
+		while ( next_instance ) {
 			next_instance = strstr(next_instance, "%");
 			if ( next_instance != NULL ) {
 				next_instance += 1*sizeof(char);
@@ -1234,6 +1280,12 @@ struct detector *get_detector_geometry(const char *filename)
 		}
 	}
 
+	if ( beam->photon_energy < -0.5 ) {
+		STATUS("Photon energy must be specified (note: this is now "
+		       "done in the 'geometry' file.\n");
+		reject = 1;
+	}
+
 	for ( x=0; x<=max_fs; x++ ) {
 	for ( y=0; y<=max_ss; y++ ) {
 		if ( find_panel(det, x, y) == NULL ) {
@@ -1302,6 +1354,7 @@ void free_detector_geometry(struct detector *det)
 
 	for ( i=0; i<det->n_panels; i++ ) {
 		free(det->panels[i].clen_from);
+		free_dim_structure(det->panels[i].dim_structure);
 	}
 
 	free(det->panels);
@@ -1646,7 +1699,7 @@ void mark_resolution_range_as_bad(struct image *image,
 }
 
 
-extern int single_panel_data_source (struct detector *det, const char *element)
+extern int single_panel_data_source(struct detector *det, const char *element)
 {
 	int pi;
 	char *first_datafrom = NULL;

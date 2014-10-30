@@ -81,7 +81,6 @@ static void show_help(const char *s)
 "  -g, --geometry=<filename>        Use geometry from file for display.\n"
 "                                   (When this option is used, the value of\n"
 "                                    of the -e parameter is ignored)"
-"  -m, --beam=<filename>            Get beam parameters from <filename>.\n"
 "\n");
 }
 
@@ -126,13 +125,14 @@ int main(int argc, char *argv[])
 	int colscale = SCALE_COLOUR;
 	char *cscale = NULL;
 	char *element = NULL;
-	char *beam = NULL;
 	double ring_size = 5.0;
 	char *reslist = NULL;
 	double ring_radii[128];
 	int n_rings = -1;
 	int median_filter = 0;
 	struct detector *det_geom = NULL;
+	struct beam_params cbeam;
+	struct beam_params *beam = NULL;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -145,7 +145,6 @@ int main(int argc, char *argv[])
 		{"colscale",           1, NULL,               'c'},
 		{"image",              1, NULL,               'e'},
 		{"geometry",           1, NULL,               'g'},
-		{"beam",               1, NULL,               'm'},
 		{"show-rings",         0, &config_showrings,   1},
 		{"ring-size",          1, NULL,                2},
 		{"simple-rings",       1, NULL,               'r'},
@@ -153,6 +152,10 @@ int main(int argc, char *argv[])
 		{"calibration-mode",   0, &config_calibmode,   1},
 		{0, 0, NULL, 0}
 	};
+
+	/* Default beam parameters */
+	cbeam.photon_energy = 0.0;
+	cbeam.photon_energy_from = NULL;
 
 	/* This isn't great, but necessary to make the command-line UI and file
 	 * formats consistent with the other programs, which all use the C
@@ -210,16 +213,13 @@ int main(int argc, char *argv[])
 			break;
 
 			case 'g' :
-			det_geom = get_detector_geometry(optarg);
+			det_geom = get_detector_geometry(optarg, &cbeam);
 			if ( det_geom == NULL ) {
-			    ERROR("Failed to read detector geometry from "
-				  "'%s'\n", optarg);
-			    return 1;
-            }
-			break;
-
-			case 'm' :
-			beam = strdup(optarg);
+				ERROR("Failed to read detector geometry from '%s'\n",
+				       optarg);
+				return 1;
+			}
+			beam = &cbeam;
 			break;
 
 			case 2 :

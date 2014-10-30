@@ -108,6 +108,7 @@ struct sandbox
 	int *filename_pipes;
 	int *stream_pipe_write;
 	struct filename_plus_event **last_filename;
+	int serial;
 
 	char *tmpdir;
 
@@ -131,9 +132,9 @@ static void unlock_sandbox(struct sandbox *sb)
 }
 
 
-static struct filename_plus_event  *get_pattern
-              (FILE *fh, int config_basename, struct detector *det,
-               const char *prefix)
+static struct filename_plus_event *get_pattern(FILE *fh, int config_basename,
+                                               struct detector *det,
+                                               const char *prefix)
 {
 	char *line = NULL;
 	size_t len;
@@ -178,8 +179,8 @@ static struct filename_plus_event  *get_pattern
 
 		len = strlen(prefix)+strlen(filename_buf)+1;
 
-		/* Round the length of the buffer, too keep Valgrind quiet when it gets
-		 * given to write() a bit later on */
+		/* Round the length of the buffer, to keep Valgrind quiet when
+		 * it gets given to write() a bit later on */
 		len += 4 - (len % 4);
 
 		if ( filename == NULL ) {
@@ -199,11 +200,11 @@ static struct filename_plus_event  *get_pattern
 
 			ev_list = initialize_event_list();
 
-			if ( scan_check == 1) {
+			if ( scan_check == 1 ) {
 
 				hdfile = hdfile_open(filename);
 				if ( hdfile == NULL ) {
-					ERROR("Failed to open file %s\n", filename);
+					ERROR("Failed to open %s\n", filename);
 					free(line);
 					return NULL;
 				}
@@ -232,6 +233,7 @@ static struct filename_plus_event  *get_pattern
 				event_index = 0;
 
 			}
+
 		} else {
 
 			event_index = 0;
@@ -289,7 +291,8 @@ static int read_fpe_data(struct buffer_data *bd)
 		for ( i=0; i<bd->rbufpos; i++ ) {
 
 			/* Is there a line in the buffer? */
-			if ( strncmp(&bd->rbuffer[i] ,"\n" ,1 ) == 0 ) {
+			if ( bd->rbuffer[i] == '\n' ) {
+				bd->rbuffer[i] = '\0';
 				line_end = i;
 				line_ready = 1;
 				break;
@@ -310,14 +313,15 @@ static int read_fpe_data(struct buffer_data *bd)
 			/* Now the block's been parsed, it should be
 			 * forgotten about */
 			memmove(bd->rbuffer,
-					bd->rbuffer + line_end + 1,
-					bd->rbuflen - line_end - 1);
+			        bd->rbuffer + line_end + 1,
+			        bd->rbuflen - line_end - 1);
 
 			/* Subtract the number of bytes removed */
 			bd->rbufpos = bd->rbufpos - line_end - 1;
 			new_rbuflen = bd->rbuflen - line_end - 1 ;
 			if ( new_rbuflen == 0 ) new_rbuflen = 256;
-			bd->rbuffer = realloc(bd->rbuffer, new_rbuflen*sizeof(char));
+			bd->rbuffer = realloc(bd->rbuffer,
+			                      new_rbuflen*sizeof(char));
 			bd->rbuflen = new_rbuflen;
 
 			return 1;
@@ -325,7 +329,8 @@ static int read_fpe_data(struct buffer_data *bd)
 		} else {
 
 			if ( bd->rbufpos == bd->rbuflen ) {
-				bd->rbuffer = realloc(bd->rbuffer, bd->rbuflen + 256);
+				bd->rbuffer = realloc(bd->rbuffer,
+				                      bd->rbuflen + 256);
 				bd->rbuflen = bd->rbuflen + 256;
 			}
 			no_line = 1;
@@ -346,15 +351,13 @@ static void run_work(const struct index_args *iargs,
 	int allDone = 0;
 	int w;
 	unsigned int opts;
-	struct buffer_data *bd;
+	struct buffer_data bd;
 
-	bd = malloc(sizeof(struct buffer_data));
-	bd->rbuffer = malloc(256*sizeof(char));
-	bd->rbuflen = 256;
-	bd->rbufpos = 0;
-	bd->line = NULL;
-	bd->fd = 0;
-
+	bd.rbuffer = malloc(256*sizeof(char));
+	bd.rbuflen = 256;
+	bd.rbufpos = 0;
+	bd.line = NULL;
+	bd.fd = 0;
 
 	fh = fdopen(filename_pipe, "r");
 	if ( fh == NULL ) {
@@ -367,11 +370,11 @@ static void run_work(const struct index_args *iargs,
 		ERROR("Failed to send request for first filename.\n");
 	}
 
-	bd->fd = fileno(fh);
+	bd.fd = fileno(fh);
 
 	/* Set non-blocking */
-	opts = fcntl(bd->fd, F_GETFL);
-	fcntl(bd->fd, F_SETFL, opts | O_NONBLOCK);
+	opts = fcntl(bd.fd, F_GETFL);
+	fcntl(bd.fd, F_SETFL, opts | O_NONBLOCK);
 
 	while ( !allDone ) {
 
@@ -384,8 +387,7 @@ static void run_work(const struct index_args *iargs,
 		error = 0;
 		pargs.filename_p_e = initialize_filename_plus_event();
 
-		rval =0;
-
+		rval = 0;
 		do {
 
 			fd_set fds;
@@ -393,12 +395,12 @@ static void run_work(const struct index_args *iargs,
 			int sval;
 
 			FD_ZERO(&fds);
-			FD_SET(bd->fd, &fds);
+			FD_SET(bd.fd, &fds);
 
 			tv.tv_sec = 30;
 			tv.tv_usec = 0;
 
-			sval = select(bd->fd+1, &fds, NULL, NULL, &tv);
+			sval = select(bd.fd+1, &fds, NULL, NULL, &tv);
 
 			if ( sval == -1 ) {
 
@@ -411,13 +413,14 @@ static void run_work(const struct index_args *iargs,
 					break;
 
 					default:
-					ERROR("select() failed: %s\n", strerror(err));
+					ERROR("select() failed: %s\n",
+					      strerror(err));
 					rval = 1;
 
 				}
 
 			} else if ( sval != 0 ) {
-				rval = read_fpe_data(bd);
+				rval = read_fpe_data(&bd);
 			} else {
 				ERROR("No data sent from main process..\n");
 				rval = 1;
@@ -431,9 +434,9 @@ static void run_work(const struct index_args *iargs,
 			continue;
 		}
 
-		chomp(bd->line);
+		chomp(bd.line);
 
-		if ( strlen(bd->line) == 0 ) {
+		if ( strlen(bd.line) == 0 ) {
 
 			allDone = 1;
 
@@ -442,8 +445,9 @@ static void run_work(const struct index_args *iargs,
 			char filename[1024];
 			char event_str[1024];
 			struct event* ev;
+			int ser;
 
-			sscanf(bd->line, "%s %s", filename, event_str);
+			sscanf(bd.line, "%s %s %i", filename, event_str, &ser);
 			pargs.filename_p_e->filename = strdup(filename);
 
 			if ( strcmp(event_str, "/") != 0 ) {
@@ -463,7 +467,7 @@ static void run_work(const struct index_args *iargs,
 
 			pargs.n_crystals = 0;
 			process_image(iargs, &pargs, st, cookie, tmpdir,
-			              results_pipe);
+			              results_pipe, ser);
 
 			/* Request another image */
 			c = sprintf(buf, "%i\n", pargs.n_crystals);
@@ -472,21 +476,19 @@ static void run_work(const struct index_args *iargs,
 				ERROR("write P0\n");
 			}
 
-			free_filename_plus_event(pargs.filename_p_e);
-
 		}
+
+		free_filename_plus_event(pargs.filename_p_e);
 
 	}
 
-	free(bd->line);
-	free(bd->rbuffer);
-	free(bd);
+	free(bd.line);
+	free(bd.rbuffer);
 
 	cleanup_indexing(iargs->indm, iargs->ipriv);
 	free(iargs->indm);
 	free(iargs->ipriv);
 	free_detector_geometry(iargs->det);
-	free_beam_parameters(iargs->beam);
 	free(iargs->element);
 	free(iargs->hdf5_peak_path);
 	free_copy_hdf5_field_list(iargs->copyme);
@@ -778,7 +780,7 @@ static void start_worker_process(struct sandbox *sb, int slot)
 		free(sb->filename_pipes);
 		free(sb->result_fhs);
 		free(sb->pids);
-		/* Also prefix, use_this_one_instead and fh */
+		/* Also prefix, tempdir, */
 
 		/* Child process gets the 'read' end of the filename
 		 * pipe, and the 'write' end of the result pipe. */
@@ -792,6 +794,8 @@ static void start_worker_process(struct sandbox *sb, int slot)
 
 		//close(filename_pipe[0]);
 		close(result_pipe[1]);
+
+		free(sb);
 
 		exit(0);
 
@@ -903,6 +907,7 @@ void create_sandbox(struct index_args *iargs, int n_proc, char *prefix,
 	sb->suspend_stats = 0;
 	sb->n_proc = n_proc;
 	sb->iargs = iargs;
+	sb->serial = 1;
 
 	sb->reader->fds = NULL;
 	sb->reader->fhs = NULL;
@@ -1105,7 +1110,8 @@ void create_sandbox(struct index_args *iargs, int n_proc, char *prefix,
 			}
 
 			/* Send next filename */
-			nextImage = get_pattern(fh, config_basename, iargs->det, prefix);
+			nextImage = get_pattern(fh, config_basename,
+			                        iargs->det, prefix);
 
 			if ( sb->last_filename[i] != NULL ) {
 				free_filename_plus_event(sb->last_filename[i]);
@@ -1123,7 +1129,10 @@ void create_sandbox(struct index_args *iargs, int n_proc, char *prefix,
 
 			} else {
 
-				r = write(sb->filename_pipes[i], nextImage->filename,
+				char tmp[256];
+
+				r = write(sb->filename_pipes[i],
+				          nextImage->filename,
 				          strlen(nextImage->filename));
 
 				if ( r < 0 ) {
@@ -1151,6 +1160,13 @@ void create_sandbox(struct index_args *iargs, int n_proc, char *prefix,
 						ERROR("write pipe\n");
 					}
 
+				}
+
+				snprintf(tmp, 255, " %i", sb->serial++);
+				r = write(sb->filename_pipes[i],
+				          tmp, strlen(tmp));
+				if ( r < 0 ) {
+					ERROR("write pipe\n");
 				}
 
 				r = write(sb->filename_pipes[i], "\n", 1);
@@ -1224,7 +1240,8 @@ void create_sandbox(struct index_args *iargs, int n_proc, char *prefix,
 	pthread_mutex_destroy(&sb->lock);
 
 	STATUS("Final:"
-	       " %i images processed, %i had crystals (%.1f%%), %i crystals overall.\n",
+	       " %i images processed, %i had crystals (%.1f%%),"
+	       " %i crystals overall.\n",
 	       sb->n_processed, sb->n_hadcrystals,
 	       100.0 * sb->n_hadcrystals / sb->n_processed, sb->n_crystals);
 

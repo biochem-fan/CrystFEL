@@ -3,13 +3,13 @@
  *
  * Invoke the DPS auto-indexing algorithm through MOSFLM
  *
- * Copyright © 2012-2013 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
  *   2010      Richard Kirian <rkirian@asu.edu>
- *   2010-2013 Thomas White <taw@physics.org>
+ *   2010-2014 Thomas White <taw@physics.org>
  *   2014      Takanori Nakane <nakane.t@gmail.com>
  *
  * This file is part of CrystFEL.
@@ -840,8 +840,7 @@ int run_mosflm(struct image *image, IndexingPrivate *ipriv)
 
 
 IndexingPrivate *mosflm_prepare(IndexingMethod *indm, UnitCell *cell,
-                                struct detector *det, struct beam_params *beam,
-                                float *ltl)
+                                struct detector *det, float *ltl)
 {
 	struct mosflm_private *mp;
 	int need_cell = 0;
@@ -850,9 +849,9 @@ IndexingPrivate *mosflm_prepare(IndexingMethod *indm, UnitCell *cell,
 	if ( *indm & INDEXING_CHECK_CELL_AXES ) need_cell = 1;
 	if ( *indm & INDEXING_USE_LATTICE_TYPE ) need_cell = 1;
 
-	if ( need_cell && (cell == NULL) ) {
-		ERROR("Altering your MOSFLM flags because no PDB file was"
-		      " provided.\n");
+	if ( need_cell && !cell_has_parameters(cell) ) {
+		ERROR("Altering your MOSFLM flags because cell parameters were"
+		      " not provided.\n");
 		*indm &= ~INDEXING_CHECK_CELL_COMBINATIONS;
 		*indm &= ~INDEXING_CHECK_CELL_AXES;
 		*indm &= ~INDEXING_USE_LATTICE_TYPE;

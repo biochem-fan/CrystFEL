@@ -641,6 +641,7 @@ static void delete_box(struct intcontext *ic, struct peak_box *bx)
 	}
 
 	free(bx->bm);
+	gsl_matrix_free(bx->bgm);
 
 	memmove(&ic->boxes[i], &ic->boxes[i+1],
 	        (ic->n_boxes-i-1)*sizeof(struct peak_box));
@@ -1914,7 +1915,8 @@ void integrate_all_2(struct image *image, IntegrationMethod meth,
                      IntDiag int_diag,
                      signed int idh, signed int idk, signed int idl)
 {
-	integrate_all_3(image, meth, PMODEL_SPHERE, 0.0, ir_inn, ir_mid, ir_out,
+	integrate_all_3(image, meth, PMODEL_SCSPHERE, 0.0,
+	                ir_inn, ir_mid, ir_out,
 	                int_diag, idh, idk, idl);
 }
 

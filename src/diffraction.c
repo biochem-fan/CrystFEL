@@ -41,7 +41,6 @@
 #include "utils.h"
 #include "cell.h"
 #include "diffraction.h"
-#include "beam-parameters.h"
 #include "symmetry.h"
 #include "pattern_sim.h"
 
@@ -146,25 +145,23 @@ static double sym_lookup_phase(const double *phases,
                                signed int h, signed int k, signed int l)
 {
 	int i;
-	double ret = 0.0;
 
 	for ( i=0; i<num_equivs(sym, NULL); i++ ) {
 
 		signed int he;
 		signed int ke;
 		signed int le;
-		double f, val;
+		int f;
 
 		get_equiv(sym, NULL, i, h, k, l, &he, &ke, &le);
 
-		f = (double)lookup_arr_flag(flags, he, ke, le);
-		val = lookup_arr_phase(phases, he, ke, le);
+		f = lookup_arr_flag(flags, he, ke, le);
 
-		ret += f*val;
+		if ( f ) return lookup_arr_phase(phases, he, ke, le);
 
 	}
 
-	return ret;
+	return 0.0;
 }
 
 
@@ -568,9 +565,10 @@ struct sample *generate_SASE(struct image *image, gsl_rng *rng)
 	eV_cen = gaussian_noise(rng, ph_lambda_to_eV(image->lambda),
 	                        jitter_sigma_eV);
 
-	/* Convert FWHM to standard deviation.  Note that bandwidth is taken to
-	 * be "delta E over E" (E = photon energy), not the bandwidth in terms
-	 * of wavelength, but the difference should be very small */
+	/* Convert FWHM to standard deviation.  Note that bandwidth is taken
+	 * here to be "delta E over E" (E = photon energy), not the bandwidth in
+	 * terms of wavelength (as it is everywhere else), but the difference
+	 * should be very small */
 	double sigma = (image->bw*eV_cen) / (2.0*sqrt(2.0*log(2.0)));
 
 	/* The spectrum will be calculated to a resolution which spreads six
@@ -615,6 +613,10 @@ struct sample *generate_twocolour(struct image *image)
 
 	eV_cen = ph_lambda_to_eV(image->lambda);
 
+	/* Convert FWHM to standard deviation.  Note that bandwidth is taken
+	 * here to be "delta E over E" (E = photon energy), not the bandwidth in
+	 * terms of wavelength (as it is everywhere else), but the difference
+	 * should be very small */
 	double halfwidth = eV_cen*image->bw/2.0; /* eV */
 
 	eV_cen1 = eV_cen - halfwidth;
