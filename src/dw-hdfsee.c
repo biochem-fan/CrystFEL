@@ -8,7 +8,7 @@
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
- *   2009-2013 Thomas White <taw@physics.org>
+ *   2009-2014 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *   2014      Takanori Nakane
  *   2012      Richard Kirian
@@ -1017,7 +1017,6 @@ static void load_features_from_file(struct image *image, const char *filename)
 	do {
 		char line[1024];
 		float intensity, sigma, fs, ss;
-		float add_fs, add_ss;
 		char phs[1024];
 		char pn[32];
 		int r;
@@ -1029,38 +1028,83 @@ static void load_features_from_file(struct image *image, const char *filename)
 		if ( rval == NULL ) continue;
 		chomp(line);
 
-		/* Try long format (from stream) */
 		r = sscanf(line, "%i %i %i %f %s %f %f %f %f %s",
 		                   &h, &k, &l, &intensity, phs, &sigma, &cts,
 		                   &fs, &ss, pn);
 
 		if ( r == 10 ) {
+
+			/* Stream reflection list format 2.3 */
 			char name[32];
 			snprintf(name, 31, "%i %i %i", h, k, l);
-
 			p = find_panel_by_name(image->det, pn);
 
-			add_fs = fs-p->orig_min_fs+p->min_fs;
-			add_ss = ss-p->orig_min_ss+p->min_ss;
-			image_add_feature(image->features, add_fs, add_ss,
+			if ( p == NULL ) {
+
+				ERROR("Unable to find panel %s "
+				      "(no geometry file given?)\n", pn);
+
+			} else {
+
+				/* Convert coordinates to match rearranged
+				 * panels in memory */
+				fs = fs-p->orig_min_fs+p->min_fs;
+				ss = ss-p->orig_min_ss+p->min_ss;
+
+			}
+
+			image_add_feature(image->features, fs, ss,
 			                  image, 1.0, strdup(name));
 			continue;
+
+		} else if ( r == 9 ) {
+
+			/* Stream reflection list format 2.2 or 2.1 */
+			char name[32];
+
+			snprintf(name, 31, "%i %i %i", h, k, l);
+
+			p = find_orig_panel(image->det, fs, ss);
+
+			if ( p == NULL ) {
+				ERROR("Unable to find panel for %s "
+				      "(no geometry file given?)\n", name);
+			} else {
+
+				/* Convert coordinates to match rearranged
+				 * panels in memory */
+				fs = fs - p->orig_min_fs + p->min_fs;
+				ss = ss - p->orig_min_ss + p->min_ss;
+
+			}
+
+			image_add_feature(image->features, fs, ss,
+			                  image, 1.0, strdup(name));
+			continue;
+
 		}
 
+
+		/* Try long peak format from stream */
 		r = sscanf(line, "%f %f %f %f %s", &fs, &ss, &d,
 		           &intensity, pn);
 		if ( r != 5 ) continue;
 
 		p = find_panel_by_name(image->det, pn);
 		if ( p == NULL ) {
-			ERROR("Unable to find panel %s\n", pn);
+			ERROR("Unable to find panel %s "
+			      "(no geometry file given?)\n", pn);
 		} else {
 
-			add_fs = fs - p->orig_min_fs + p->min_fs;
-			add_ss = ss - p->orig_min_ss + p->min_ss;
-			image_add_feature(image->features, add_fs, add_ss,
-			                  image, 1.0, "peak");
+			/* Convert coordinates to match rearranged panels in
+			 * memory */
+			fs = fs - p->orig_min_fs + p->min_fs;
+			ss = ss - p->orig_min_ss + p->min_ss;
+
 		}
+
+		image_add_feature(image->features, fs, ss, image, 1.0, "peak");
+
 
 	} while ( rval != NULL );
 
@@ -2438,6 +2482,8 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 
 	dw->image->det = det_geom;
 	dw->image->beam = beam;
+	dw->image->lambda = 0.0;
+	dw->image->filename = filename;
 
 	dw->hdfile = hdfile_open(filename);
 	if ( dw->hdfile == NULL ) {
@@ -2484,7 +2530,7 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 	} else {
 		check =	hdf5_read(dw->hdfile, dw->image, element, 0);
 	}
-	if (check) {
+	if ( check ) {
 		ERROR("Couldn't load file\n");
 		free(dw);
 		hdfile_close(dw->hdfile);

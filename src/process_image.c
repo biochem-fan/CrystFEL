@@ -112,7 +112,8 @@ static void refine_radius(Crystal *cr)
 
 
 void process_image(const struct index_args *iargs, struct pattern_args *pargs,
-                   Stream *st, int cookie, const char *tmpdir, int results_pipe)
+                   Stream *st, int cookie, const char *tmpdir, int results_pipe,
+                   int serial)
 {
 	float *data_for_measurement;
 	size_t data_size;
@@ -134,6 +135,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	image.det = iargs->det;
 	image.crystals = NULL;
 	image.n_crystals = 0;
+	image.serial = serial;
 
 	hdfile = hdfile_open(image.filename);
 	if ( hdfile == NULL ) {
@@ -161,12 +163,6 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	}
 
 	mark_resolution_range_as_bad(&image, iargs->highres, +INFINITY);
-
-	hdfile = hdfile_open(image.filename);
-	if ( hdfile == NULL ) {
-		ERROR("Couldn't open file %s.\n", image.filename);
-		return;
-	}
 
 	switch ( iargs->peaks ) {
 
@@ -222,6 +218,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		hdfile_close(hdfile);
 		return;
 	}
+	free(rn);
 
 	pargs->n_crystals = image.n_crystals;
 	for ( i=0; i<image.n_crystals; i++ ) {

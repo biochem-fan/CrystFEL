@@ -88,8 +88,8 @@ struct hdfile {
 
 	const char      *path;  /* Current data path */
 
-	size_t          nx;  /* Image width */
-	size_t          ny;  /* Image height */
+	size_t          nfs;  /* Image width */
+	size_t          nss;  /* Image height */
 
 	hid_t           fh;  /* HDF file handle */
 	hid_t           dh;  /* Dataset handle */
@@ -106,7 +106,8 @@ struct hdfile *hdfile_open(const char *filename)
 	if ( f == NULL ) return NULL;
 
 	if ( access( filename, R_OK ) == -1 ) {
-		ERROR("File does not exists or it cannot be read: %s\n", filename);
+		ERROR("File does not exists or it cannot be read: %s\n",
+		      filename);
 		free(f);
 		return NULL;
 	}
@@ -151,7 +152,8 @@ int hdfile_set_image(struct hdfile *f, const char *path,
 	} else {
 
 		if ( sh_dim != p->dim_structure->num_dims ) {
-			ERROR("Dataset dimensionality does not match geometry file\n");
+			ERROR("Dataset dimensionality does not match "
+			      "geometry file\n");
 			return -1;
 		}
 
@@ -165,18 +167,18 @@ int hdfile_set_image(struct hdfile *f, const char *path,
 
 	if ( p == NULL ) {
 
-		f->nx = size[0];
-		f->ny = size[1];
+		f->nss = size[0];
+		f->nfs = size[1];
 
 	} else {
 
-		for (di=0; di<p->dim_structure->num_dims; di++ ) {
+		for ( di=0; di<p->dim_structure->num_dims; di++ ) {
 
-			if (p->dim_structure->dims[di] == HYSL_SS ) {
-				f->ny = size[di];
+			if ( p->dim_structure->dims[di] == HYSL_SS ) {
+				f->nss = size[di];
 			}
-			if (p->dim_structure->dims[di] == HYSL_FS ) {
-				f->nx = size[di];
+			if ( p->dim_structure->dims[di] == HYSL_FS ) {
+				f->nfs = size[di];
 			}
 
 		}
@@ -259,9 +261,13 @@ int get_peaks(struct image *image, struct hdfile *f, const char *p)
 		ss = buf[tw*i+1];
 		val = buf[tw*i+2];
 
-		p = find_panel(image->det, fs, ss);
+		p = find_orig_panel(image->det, fs, ss);
 		if ( p == NULL ) continue;
 		if ( p->no_index ) continue;
+
+		/* Convert coordinates to match rearranged panels in memory */
+		fs = fs - p->orig_min_fs + p->min_fs;
+		ss = ss - p->orig_min_ss + p->min_ss;
 
 		image_add_feature(image->features, fs, ss, image, val, NULL);
 
@@ -922,7 +928,7 @@ void fill_in_beam_parameters(struct beam_params *beam, struct hdfile *f,
 
 	}
 
-	image->lambda = ph_en_to_lambda(eV_to_J(eV)) * beam->photon_energy_scale;
+	image->lambda = ph_en_to_lambda(eV_to_J(eV))*beam->photon_energy_scale;
 }
 
 
@@ -944,12 +950,10 @@ int hdf5_read(struct hdfile *f, struct image *image, const char *element,
 		return 1;
 	}
 
-	/* Note the "swap" here, according to section 3.2.5,
-	 * "C versus Fortran Dataspaces", of the HDF5 user's guide. */
-	image->width = f->ny;
-	image->height = f->nx;
+	image->width = f->nfs;
+	image->height = f->nss;
 
-	buf = malloc(sizeof(float)*f->nx*f->ny);
+	buf = malloc(sizeof(float)*f->nfs*f->nss);
 
 	r = H5Dread(f->dh, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL,
 				H5P_DEFAULT, buf);
@@ -969,9 +973,9 @@ int hdf5_read(struct hdfile *f, struct image *image, const char *element,
 		if ( image->lambda > 1000 ) {
 			/* Error message covers a silly value in the beam file
 			 * or in the HDF5 file. */
-			ERROR("Nonsensical wavelength (%e m) for %s.\n",
+			ERROR("WARNING: Missing or nonsensical wavelength "
+			      "(%e m) for %s.\n",
 			      image->lambda, image->filename);
-			return 1;
 		}
 
 	}
@@ -980,19 +984,82 @@ int hdf5_read(struct hdfile *f, struct image *image, const char *element,
 }
 
 
+static void load_mask(struct hdfile *f, struct event *ev, char *mask,
+                      const char *pname, struct image *image,
+                      size_t p_w, size_t sum_p_h,
+                      hsize_t *f_offset, hsize_t *f_count,
+                      hsize_t *m_offset, hsize_t *m_count)
+{
+	hid_t mask_dataspace, mask_dh;
+	int exists;
+	int check, r;
+	hid_t memspace;
+	hsize_t dimsm[2];
+
+	if ( ev != NULL ) {
+		mask = retrieve_full_path(ev, mask);
+	}
+
+	exists = check_path_existence(f->fh, mask);
+	if ( !exists ) {
+		ERROR("Cannot find flags for panel %s\n", pname);
+		goto err;
+	}
+
+	mask_dh = H5Dopen2(f->fh, mask, H5P_DEFAULT);
+	if ( mask_dh <= 0 ) {
+		ERROR("Couldn't open flags for panel %s\n", pname);
+		goto err;
+	}
+
+	mask_dataspace = H5Dget_space(mask_dh);
+	check = H5Sselect_hyperslab(mask_dataspace, H5S_SELECT_SET,
+	                            f_offset, NULL, f_count, NULL);
+	if ( check < 0 ) {
+		ERROR("Error selecting mask dataspace for panel %s\n", pname);
+		goto err;
+	}
+
+	dimsm[0] = sum_p_h;
+	dimsm[1] = p_w;
+	memspace = H5Screate_simple(2, dimsm, NULL);
+	check = H5Sselect_hyperslab(memspace, H5S_SELECT_SET,
+	                            m_offset, NULL, m_count, NULL);
+	if ( check < 0 ) {
+		ERROR("Error selecting memory dataspace for panel %s\n", pname);
+		goto err;
+	}
+
+	r = H5Dread(mask_dh, H5T_NATIVE_UINT16, memspace,
+	            mask_dataspace, H5P_DEFAULT, image->flags);
+	if ( r < 0 ) {
+		ERROR("Couldn't read flags for panel %s\n", pname);
+		goto err;
+	}
+
+	H5Sclose(mask_dataspace);
+	H5Dclose(mask_dh);
+	if ( ev != NULL ) free(mask);
+
+	return;
+
+err:
+	if ( ev != NULL ) free(mask);
+	free(image->flags);
+	image->flags = NULL;
+	return;
+}
+
+
 int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
                int satcorr)
 {
 	herr_t r;
 	float *buf;
-	uint16_t *flags;
 	int sum_p_h;
 	int p_w;
 	int m_min_fs, curr_ss, m_max_fs;
-	int mask_is_present;
-	int no_mask_loaded;
 	int pi;
-	hid_t mask_dh = 0;
 
 	if ( image->det == NULL ) {
 		ERROR("Geometry not available\n");
@@ -1009,23 +1076,27 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 			return 1;
 		}
 
-		if ( image->det->panels[pi].mask != NULL ) mask_is_present = 1;
-
 		sum_p_h += image->det->panels[pi].h;
 
 	}
 
 	buf = malloc(sizeof(float)*p_w*sum_p_h);
-	if ( mask_is_present ) {
-		flags = calloc(p_w*sum_p_h,sizeof(uint16_t));
+	if ( buf == NULL ) {
+		ERROR("Failed to allocate memory for image\n");
+		return 1;
 	}
 	image->width = p_w;
 	image->height = sum_p_h;
 
+	image->flags = calloc(p_w*sum_p_h,sizeof(uint16_t));
+	if ( image->flags == NULL ) {
+		ERROR("Failed to allocate memory for flags\n");
+		return 1;
+	}
+
 	m_min_fs = 0;
 	m_max_fs = p_w-1;
 	curr_ss = 0;
-	no_mask_loaded = 1;
 
 	for ( pi=0; pi<image->det->n_panels; pi++ ) {
 
@@ -1036,11 +1107,11 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 		hsize_t m_offset[2], m_count[2];
 		hsize_t dimsm[2];
 		herr_t check;
-		hid_t dataspace, memspace, mask_dataspace;
+		hid_t dataspace, memspace;
 		int fail;
-
 		struct panel *p;
-		p=&image->det->panels[pi];
+
+		p = &image->det->panels[pi];
 
 		if ( ev != NULL ) {
 
@@ -1086,8 +1157,8 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 			return 1;
 		}
 
-		data_width = f->ny;
-		data_height = f->nx;
+		data_width = f->nfs;
+		data_height = f->nss;
 
 		if ( (data_width < p->w )
 		  || (data_height < p->h) )
@@ -1127,7 +1198,7 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 		dataspace = H5Dget_space(f->dh);
 		check = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET,
 		                            f_offset, NULL, f_count, NULL);
-		if ( check <0 ) {
+		if ( check < 0 ) {
 			ERROR("Error selecting file dataspace for panel %s\n",
 			      p->name);
 			free(buf);
@@ -1140,7 +1211,7 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 		m_count[1] = m_max_fs - m_min_fs +1;
 		dimsm[0] = sum_p_h;
 		dimsm[1] = p_w;
-		memspace = H5Screate_simple(2,dimsm,NULL);
+		memspace = H5Screate_simple(2, dimsm, NULL);
 		check = H5Sselect_hyperslab(memspace, H5S_SELECT_SET,
 		                            m_offset, NULL, m_count, NULL);
 		if ( check < 0 ) {
@@ -1164,92 +1235,8 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 		H5Sclose(memspace);
 
 		if ( p->mask != NULL ) {
-
-			if ( ev != NULL ) {
-
-				int exists;
-				char *mask_full_path;
-
-				mask_full_path = retrieve_full_path(ev, p->mask);
-
-				exists = check_path_existence(f->fh,
-				                              mask_full_path);
-				if ( !exists ) {
-					ERROR("Cannot find flags for panel %s\n",
-					      p->name);
-					return 1;
-				}
-
-				mask_dh = H5Dopen2(f->fh, mask_full_path,
-				                   H5P_DEFAULT);
-
-				if ( mask_dh <= 0 ) {
-					ERROR("Couldn't open flags for panel %s\n",
-					      p->name);
-					image->flags = NULL;
-				} else {
-
-					mask_dataspace = H5Dget_space(mask_dh);
-					check = H5Sselect_hyperslab(mask_dataspace, H5S_SELECT_SET,
-					                            f_offset, NULL, f_count, NULL);
-					if ( check < 0 ) {
-						ERROR("Error selecting mask dataspace for panel %s\n",
-						      p->name);
-					}
-					r = H5Dread(mask_dh, H5T_NATIVE_UINT16, memspace,
-					        mask_dataspace, H5P_DEFAULT, flags);
-					if ( r < 0 ) {
-						ERROR("Couldn't read flags for panel %s\n",
-						      p->name);
-					} else {
-						no_mask_loaded = 0;
-					}
-
-					H5Sclose(mask_dataspace);
-					H5Dclose(mask_dh);
-
-				}
-
-			} else {
-
-				int exists;
-				exists = check_path_existence(f->fh, p->mask);
-				if ( !exists ) {
-					ERROR("Cannot find flags for panel %s\n",
-					      p->name);
-					return 1;
-				}
-
-				mask_dh = H5Dopen2(f->fh, p->mask, H5P_DEFAULT);
-				if ( mask_dh <= 0 ) {
-					ERROR("Couldn't open flags for panel %s\n",
-					      p->name);
-					image->flags = NULL;
-				} else {
-
-					mask_dataspace = H5Dget_space(mask_dh);
-					check = H5Sselect_hyperslab(mask_dataspace, H5S_SELECT_SET,
-					                            f_offset, NULL, f_count, NULL);
-					if ( check < 0 ) {
-						ERROR("Error selecting mask dataspace for panel %s\n",
-						      p->name);
-					}
-					r = H5Dread(mask_dh, H5T_NATIVE_UINT16, memspace,
-					            mask_dataspace, H5P_DEFAULT, flags);
-					if ( r < 0 ) {
-						ERROR("Couldn't read flags for panel %s\n",
-						      p->name);
-					} else {
-						no_mask_loaded = 0;
-					}
-
-					H5Sclose(mask_dataspace);
-					H5Dclose(mask_dh);
-
-				}
-
-			}
-
+			load_mask(f, ev, p->mask, p->name, image, p_w, sum_p_h,
+			          f_offset, f_count, m_offset, m_count);
 		}
 
 		p->min_fs = m_min_fs;
@@ -1264,12 +1251,6 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 	}
 
 	image->data = buf;
-
-	if ( no_mask_loaded ) {
-		free(flags);
-	} else {
-		image->flags = flags;
-	}
 
 	if ( satcorr ) debodge_saturation(f, image);
 
@@ -1332,7 +1313,7 @@ int hdfile_is_scalar(struct hdfile *f, const char *name, int verbose)
 
 	check = check_path_existence(f->fh, name);
 	if ( check == 0 ) {
-		ERROR("No such field '%s'\n", name);
+		ERROR("No such scalar field '%s'\n", name);
 		return 0;
 	}
 
@@ -1389,7 +1370,7 @@ static int get_f_value(struct hdfile *f, const char *name, double *val)
 
 	check = check_path_existence(f->fh, name);
 	if ( check == 0 ) {
-		ERROR("No such field '%s'\n", name);
+		ERROR("No such float field '%s'\n", name);
 		return 1;
 	}
 
@@ -1450,7 +1431,7 @@ static int get_ev_based_f_value(struct hdfile *f, const char *name,
 
 	check_pe = check_path_existence(f->fh, subst_name);
 	if ( check_pe == 0 ) {
-		ERROR("No such field '%s'\n", subst_name);
+		ERROR("No such event-based float field '%s'\n", subst_name);
 		return 1;
 	}
 
@@ -1578,7 +1559,7 @@ static int get_i_value(struct hdfile *f, const char *name, int *val)
 
 	check = check_path_existence(f->fh, name);
 	if ( check == 0 ) {
-		ERROR("No such field '%s'\n", name);
+		ERROR("No such integer field '%s'\n", name);
 		return 1;
 	}
 
@@ -1609,7 +1590,7 @@ static int get_i_value(struct hdfile *f, const char *name, int *val)
 
 double get_value(struct hdfile *f, const char *name)
 {
-	double val;
+	double val = 0.0;
 	get_f_value(f, name, &val);
 	return val;
 }

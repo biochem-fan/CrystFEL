@@ -238,12 +238,13 @@ void free_event_list(struct event_list *el)
 
 void free_filename_plus_event(struct filename_plus_event *fpe)
 {
-
 	free(fpe->filename);
 
 	if ( fpe->ev != NULL ) {
 		free_event(fpe->ev);
 	}
+
+	free(fpe);
 }
 
 
@@ -253,7 +254,7 @@ char *get_event_string(struct event *ev)
 	char *new_ret_string;
 	int ret_string_len;
 
-	if ( ev == NULL ) return "null event";
+	if ( ev == NULL ) return "(none)";
 
 	if ( ev->path_length != 0 ) {
 
@@ -265,8 +266,8 @@ char *get_event_string(struct event *ev)
 		for ( pi=1; pi<ev->path_length; pi++ ) {
 
 			new_ret_string = realloc(ret_string,
-			                 (ret_string_len+1+strlen(ev->path_entries[pi]))
-			                 *sizeof(char));
+			         (ret_string_len+1+strlen(ev->path_entries[pi]))
+			          * sizeof(char));
 			if ( new_ret_string == NULL ) {
 				return NULL;
 			}
@@ -360,21 +361,17 @@ struct event *get_event_from_event_string(char *ev_string)
 	char *sep;
 	char *start;
 
-	ev = initialize_event();
-	if ( ev == NULL ) {
-		return NULL;
-	}
-
 	ev_sep = strstr(ev_string, "//");
-	if ( ev_sep == NULL ) {
-		return NULL;
-	}
+	if ( ev_sep == NULL ) return NULL;
 
 	strncpy(buf_path, ev_string, ev_sep-ev_string);
 	buf_path[ev_sep-ev_string] = '\0';
 
 	strncpy(buf_dim, ev_sep+2, strlen(ev_sep)-2);
 	buf_dim[strlen(ev_sep)-2] = '\0';
+
+	ev = initialize_event();
+	if ( ev == NULL ) return NULL;
 
 	if ( strlen(buf_path) !=0 ) {
 
@@ -398,10 +395,10 @@ struct event *get_event_from_event_string(char *ev_string)
 				push_path_entry_to_event(ev, buf);
 
 			}
+
 		} while (sep);
 
 	}
-
 
 	if ( strlen(buf_dim) !=0 ) {
 
@@ -438,19 +435,17 @@ struct event *get_event_from_event_string(char *ev_string)
 
 int push_path_entry_to_event(struct event *ev, const char *entry)
 {
-		char **new_path_entries;
+	char **new_path_entries;
 
-		new_path_entries = realloc(ev->path_entries,
-                                 (1+ev->path_length)*sizeof(char *));
-		if ( new_path_entries == NULL ) {
-			return 1;
-		}
+	new_path_entries = realloc(ev->path_entries,
+	                           (1+ev->path_length)*sizeof(char *));
+	if ( new_path_entries == NULL ) return 1;
 
-		ev->path_entries = new_path_entries;
-		ev->path_entries[ev->path_length] = strdup(entry);
-		ev->path_length += 1;
+	ev->path_entries = new_path_entries;
+	ev->path_entries[ev->path_length] = strdup(entry);
+	ev->path_length += 1;
 
-		return 0;
+	return 0;
 }
 
 
@@ -459,10 +454,8 @@ int push_dim_entry_to_event(struct event *ev, int entry)
 	int *new_dim_entries;
 
 	new_dim_entries = realloc(ev->dim_entries,
-                                 (1+ev->dim_length)*sizeof(int));
-	if ( new_dim_entries == NULL ) {
-		return 1;
-	}
+	                          (1+ev->dim_length)*sizeof(int));
+	if ( new_dim_entries == NULL ) return 1;
 
 	ev->dim_entries = new_dim_entries;
 	ev->dim_entries[ev->dim_length] = entry;
@@ -476,9 +469,7 @@ int pop_path_entry_from_event(struct event *ev)
 {
 	char **new_path_entries;
 
-	if ( ev->path_length == 0 ) {
-			return 1;
-	}
+	if ( ev->path_length == 0 ) return 1;
 
 	free(ev->path_entries[ev->path_length-1]);
 
@@ -491,9 +482,7 @@ int pop_path_entry_from_event(struct event *ev)
 	new_path_entries = realloc(ev->path_entries,
 	                           (ev->path_length-1)*sizeof(char *));
 
-	if ( new_path_entries == NULL) {
-		return 1;
-	}
+	if ( new_path_entries == NULL ) return 1;
 
 	ev->path_entries = new_path_entries;
 	ev->path_length = ev->path_length-1;
@@ -607,10 +596,9 @@ char *partial_event_substitution(struct event *ev, const char *data)
 struct dim_structure *initialize_dim_structure()
 {
 	struct dim_structure *hs;
+
 	hs = malloc(sizeof(struct dim_structure));
-	if ( hs == NULL ) {
-		return NULL;
-	}
+	if ( hs == NULL ) return NULL;
 
 	hs->dims = NULL;
 	hs->num_dims = 0;
@@ -634,12 +622,8 @@ struct dim_structure *default_dim_structure()
 
 void free_dim_structure(struct dim_structure *hsd)
 {
-	int di;
-
-	for ( di=0; di<hsd->num_dims; di++ ) {
-		free (hsd->dims);
-		free (hsd);
-	}
+	free(hsd->dims);
+	free(hsd);
 }
 
 
@@ -669,10 +653,7 @@ int set_dim_structure_entry(struct dim_structure *hsd, const char *string_dim,
 		int di;
 
 		int *new_dims = malloc(dim_entry*sizeof(int));
-		if ( new_dims == NULL ) {
-			return 0;
-		}
-
+		if ( new_dims == NULL ) return 0;
 
 		for ( di=0; di<dim_entry; di++ ) {
 			new_dims[di] = HYSL_UNDEFINED;
@@ -683,9 +664,7 @@ int set_dim_structure_entry(struct dim_structure *hsd, const char *string_dim,
 		}
 
 		new_dims[dim_entry-1] = parse_dim_structure_val(val_string);
-		if ( hsd->dims == NULL ) {
-			free (hsd->dims);
-		}
+		free(hsd->dims);
 		hsd->dims = new_dims;
 		hsd->num_dims = dim_entry;
 

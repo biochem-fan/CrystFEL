@@ -196,6 +196,7 @@ int main(int argc, char *argv[])
 	char *int_diag = NULL;
 	char *geom_filename = NULL;
 	struct beam_params beam;
+	int have_push_res = 0;
 
 	/* Defaults */
 	iargs.cell = NULL;
@@ -243,6 +244,7 @@ int main(int argc, char *argv[])
 
 		/* Options with long and short versions */
 		{"help",               0, NULL,               'h'},
+		{"version",            0, NULL,               'v'},
 		{"input",              1, NULL,               'i'},
 		{"output",             1, NULL,               'o'},
 		{"indexing",           1, NULL,               'z'},
@@ -253,7 +255,6 @@ int main(int argc, char *argv[])
 		{"image",              1, NULL,               'e'},
 
 		/* Long-only options with no arguments */
-		{"version",            0, NULL,                     99},
 		{"filter-noise",       0, &iargs.noisefilter,        1},
 		{"no-check-prefix",    0, &config_checkprefix,       0},
 		{"basename",           0, &config_basename,          1},
@@ -420,6 +421,7 @@ int main(int argc, char *argv[])
 				return 1;
 			}
 			iargs.push_res *= 1e9;  /* nm^-1 -> m^-1 */
+			have_push_res = 1;
 			break;
 
 			case 20 :
@@ -497,7 +499,8 @@ int main(int argc, char *argv[])
 
 	iargs.det = get_detector_geometry(geom_filename, iargs.beam);
 	if ( iargs.det == NULL ) {
-		ERROR("Failed to read detector geometry from  '%s'\n", optarg);
+		ERROR("Failed to read detector geometry from  '%s'\n",
+		      geom_filename);
 		return 1;
 	}
 
@@ -533,6 +536,11 @@ int main(int argc, char *argv[])
 	if ( integrate_saturated ) {
 		/* Option provided for backwards compatibility */
 		iargs.int_meth |= INTEGRATION_SATURATED;
+	}
+
+	if ( have_push_res && !(iargs.int_meth & INTEGRATION_RESCUT) ) {
+		ERROR("WARNING: You used --push-res, but not -rescut, "
+		      "therefore --push-res will have no effect.\n");
 	}
 
 	if ( toler != NULL ) {
@@ -679,6 +687,8 @@ int main(int argc, char *argv[])
 	free(prefix);
 	free(tempdir);
 	free_detector_geometry(iargs.det);
+	close_stream(st);
+	cleanup_indexing(indm, ipriv);
 
 	return 0;
 }
