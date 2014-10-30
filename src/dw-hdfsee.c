@@ -71,7 +71,7 @@ struct newhdf {
 	char name[1024];
 };
 
-static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh);
+static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh, struct event *ev);
 
 static void displaywindow_error(DisplayWindow *dw, const char *message)
 {
@@ -1358,11 +1358,12 @@ struct savedialog {
 static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow *dw) {
 	GtkTreeIter iter;
 	GtkTreeModel *model;
-	gchar *filename;
+	gchar *filename, *eventname;
 	long offset;
   
 	if (gtk_tree_selection_get_selected (selection, &model, &iter)) {
-		gtk_tree_model_get (model, &iter, COLUMN_FILENAME, &filename, COLUMN_OFFSET, &offset, -1);
+		gtk_tree_model_get (model, &iter, COLUMN_FILENAME, &filename,
+		                    COLUMN_EVENT, &eventname, COLUMN_OFFSET, &offset, -1);
     
 		/* TODO: resolve relative path */
 		struct hdfile *newhdf = hdfile_open(filename);
@@ -1396,12 +1397,16 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
 		free(title);
 		dw->image->filename = strdup(bn);
     
+		/* prepare event */
+		struct event *ev = NULL;
+		ev = get_event_from_event_string(eventname);
+
 		/* reload image */
 		struct newhdf nh;
 		nh.dw = dw;
 		nh.name[0] = '\0';
 		nh.widget = NULL;
-		displaywindow_newhdf(NULL, &nh);
+		displaywindow_newhdf(NULL, &nh, ev);
     
 		/* load spot list */
 		if (dw->stream != NULL && seek_stream(dw->stream, offset) == 0) {
@@ -1617,7 +1622,7 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 		}
 		char *event_string = NULL;
 		if (image.event != NULL) {
-			get_event_string(image.event);
+			event_string = get_event_string(image.event);
 		}
 		gtk_list_store_append(data, &iter);
 
@@ -1644,7 +1649,9 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
     		if (image.event != NULL) {
 			free(image.filename);
 		}
-		free(event_string);
+		if (image.event != NULL) {
+			free(event_string);
+		}
 		image_feature_list_free(image.features);
 		free(image.crystals);
 	}
@@ -2128,7 +2135,7 @@ static void do_filters(DisplayWindow *dw)
 	}
 }
 
-static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh)
+static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh, struct event *ev)
 {
 	gboolean a;
 	int fail;
@@ -2141,9 +2148,17 @@ static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh)
 	}
 
 	if (nh->widget != NULL) {
-		fail = hdf5_read(nh->dw->hdfile, nh->dw->image, nh->name, 0);
+		if (ev == NULL) {
+			fail = hdf5_read(nh->dw->hdfile, nh->dw->image, nh->name, 0);
+		} else {
+			fail = hdf5_read2(nh->dw->hdfile, nh->dw->image, ev, 0);
+		}
 	} else {
-		fail = hdf5_read(nh->dw->hdfile, nh->dw->image, NULL, 0);
+		if (ev == NULL) {
+			fail = hdf5_read(nh->dw->hdfile, nh->dw->image, NULL, 0);
+		} else {
+			fail = hdf5_read2(nh->dw->hdfile, nh->dw->image, ev, 0);
+		}
 	}	      
 	if ( fail ) {
 		ERROR("Couldn't load image");
