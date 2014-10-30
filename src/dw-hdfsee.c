@@ -1399,7 +1399,9 @@ static void stream_selection_changed(GtkTreeSelection *selection, DisplayWindow 
     
 		/* prepare event */
 		struct event *ev = NULL;
-		ev = get_event_from_event_string(eventname);
+		if (eventname != NULL) {
+			ev = get_event_from_event_string(eventname);
+		}
 
 		/* reload image */
 		struct newhdf nh;
