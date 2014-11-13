@@ -1213,7 +1213,7 @@ static gint displaywindow_about(GtkWidget *widget, DisplayWindow *dw)
 static int save_geometry_file(DisplayWindow *dw)
 {
 	GtkWidget *d;
-	gchar * filename;
+	gchar *output_filename;
 	int w;
 
 	d = gtk_file_chooser_dialog_new("Save Detector Geometry",
@@ -1223,11 +1223,12 @@ static int save_geometry_file(DisplayWindow *dw)
                                         GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
 	                                NULL);
 
-	gtk_dialog_run (GTK_DIALOG (d));
-	filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER (d));
-	w = write_detector_geometry(filename, dw->image->det);
+	gtk_dialog_run(GTK_DIALOG(d));
+	output_filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER (d));
+	w = write_detector_geometry(dw->geom_filename, output_filename,
+	                            dw->image->det);
 	gtk_widget_destroy(d);
-	g_free(filename);
+	g_free(output_filename);
 	return w;
 }
 
@@ -2863,7 +2864,8 @@ static gint displaywindow_keypress(GtkWidget *widget, GdkEventKey *event,
 }
 
 
-DisplayWindow *displaywindow_open(char *filename, const char *peaks,
+DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
+                                  const char *peaks,
                                   double boost, int binning,
                                   int noisefilter, int calibmode, int colscale,
                                   const char *element,
@@ -2917,6 +2919,7 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 	dw->multi_event = 0;
 	dw->curr_event = 0;
 	dw->ev_list = NULL;
+	dw->geom_filename = strdup(geom_filename);
 
 	dw->image->det = det_geom;
 	dw->image->beam = beam;
@@ -2929,6 +2932,7 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 		dw->hdfile = hdfile_open(filename);
 		if ( dw->hdfile == NULL ) {
 			ERROR("Couldn't open file: %s\n", filename);
+			free(dw->geom_filename);
 			free(dw);
 			return NULL;
 		}
@@ -2942,12 +2946,14 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 			if ( dw->ev_list == NULL ) {
 				ERROR("Error while parsing file structure\n");
 				free_event_list(dw->ev_list);
+				free(dw->geom_filename);
 				free(dw);
 				return NULL;
 			}
 			if ( dw->ev_list->num_events == 0 ) {
 				ERROR("Multi-event geometry file but no events found in data file");
 				free_event_list(dw->ev_list);
+				free(dw->geom_filename);
 				free(dw);
 				return NULL;
 			} else {
@@ -2969,8 +2975,9 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 		}
 		if (check) {
 			ERROR("Couldn't load file\n");
-			free(dw);
+			free(dw->geom_filename);
 			hdfile_close(dw->hdfile);
+			free(dw);
 			return NULL;
 		}
 	}
@@ -3057,7 +3064,8 @@ DisplayWindow *displaywindow_open(char *filename, const char *peaks,
 		displaywindow_update_menus(dw, element);
 	} else {
 		if ( dw->multi_event != 0 ) {
-			displaywindow_update_event_menu(dw, dw->ev_list, dw->curr_event);
+			displaywindow_update_event_menu(dw, dw->ev_list,
+			                                dw->curr_event);
 		}
 	}
 

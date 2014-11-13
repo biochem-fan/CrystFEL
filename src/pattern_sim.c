@@ -94,11 +94,9 @@ static void show_help(const char *s)
 "     --background=<N>      Add N photons of Poisson background (default 0).\n"
 "     --template=<file>     Take orientations from stream <file>.\n"
 "     --no-fringes          Exclude the side maxima of Bragg peaks.\n"
-"     --beam-divergence    Beam divergence in radians. Default 1 mrad.\n"
 "     --beam-bandwidth     Beam bandwidth as a fraction. Default 1%%.\n"
-"     --profile-radius     Reciprocal space reflection profile radius in m^-1.\n"
-"                           Default 0.001e9 m^-1\n"
 "     --photon-energy      Photon energy in eV.  Default 9000.\n"
+"     --nphotons           Number of photons per X-ray pulse.  Default 1e12.\n"
 );
 }
 
@@ -247,7 +245,6 @@ int main(int argc, char *argv[])
 	char *grad_str = NULL;
 	char *outfile = NULL;
 	char *geometry = NULL;
-	char *beamfile = NULL;
 	char *spectrum_str = NULL;
 	GradientMethod grad;
 	SpectrumType spectrum_type;
@@ -279,6 +276,7 @@ int main(int argc, char *argv[])
 		{"help",               0, NULL,               'h'},
 		{"version",            0, NULL,               'v'},
 		{"gpu",                0, &config_gpu,         1},
+		{"beam",               1, NULL,               'b'},
 		{"random-orientation", 0, NULL,               'r'},
 		{"number",             1, NULL,               'n'},
 		{"no-images",          0, &config_noimages,    1},
@@ -310,7 +308,7 @@ int main(int argc, char *argv[])
 	};
 
 	/* Short options */
-	while ((c = getopt_long(argc, argv, "hrn:i:t:p:o:g:y:s:x:v",
+	while ((c = getopt_long(argc, argv, "hrn:i:t:p:o:g:y:s:x:vb:",
 	                        longopts, NULL)) != -1) {
 
 		switch (c) {
@@ -323,6 +321,12 @@ int main(int argc, char *argv[])
 			printf("CrystFEL: " CRYSTFEL_VERSIONSTRING "\n");
 			printf(CRYSTFEL_BOILERPLATE"\n");
 			return 0;
+
+			case 'b' :
+			ERROR("WARNING: This version of CrystFEL no longer "
+			      "uses beam files.  Please remove the beam file "
+			      "from your pattern_sim command line.\n");
+			return 1;
 
 			case 'r' :
 			config_randomquat = 1;
@@ -358,10 +362,6 @@ int main(int argc, char *argv[])
 
 			case 'g' :
 			geometry = strdup(optarg);
-			break;
-
-			case 'b' :
-			beamfile = strdup(optarg);
 			break;
 
 			case 'y' :
@@ -612,7 +612,6 @@ int main(int argc, char *argv[])
 	image.lambda = wl;
 	image.bw = bandwidth;
 	image.nsamples = nsamples;
-	free(beamfile);
 
 	/* Load unit cell */
 	input_cell = load_cell_from_file(filename);
