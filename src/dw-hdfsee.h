@@ -3,12 +3,12 @@
  *
  * Quick yet non-crappy HDF viewer
  *
- * Copyright © 2012 Deutsches Elektronen-Synchrotron DESY,
- *                  a research centre of the Helmholtz Association.
+ * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
- *   2009-2012 Thomas White <taw@physics.org>
+ *   2009-2014 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *   2014      Takanori Nakane <nakane.t@gmail.com>
  *   2012      Richard Kirian
@@ -90,10 +90,12 @@ typedef struct {
 
 	int             not_ready_yet;
 
-    struct detector* simple_geom;
+	struct detector *simple_geom;
 
-    struct hdfile	*hdfile;
+	struct hdfile	*hdfile;
 	struct image	*image;
+
+	char            *geom_filename;
 
 	/* Dialog boxes */
 	BinningDialog  *binning_dialog;
@@ -137,7 +139,7 @@ typedef struct {
 } DisplayWindow;
 
 /* Open an image display window showing the given filename, or NULL */
-extern DisplayWindow *displaywindow_open(char *filename,
+extern DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
                                          const char *peaks, double boost,
                                          int binning,
                                          int noisefilter, int calibmode,
