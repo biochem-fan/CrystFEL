@@ -1613,7 +1613,7 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 */
 
 		struct image image;
-		image.det = NULL;
+		image.det = dw->image->det; // needed by read_peaks_2_3
 		image.event = NULL;
     
 		/* Get data from next chunk */
