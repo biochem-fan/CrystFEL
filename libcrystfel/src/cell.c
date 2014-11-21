@@ -3,15 +3,15 @@
  *
  * A class representing a unit cell
  *
- * Copyright © 2012 Deutsches Elektronen-Synchrotron DESY,
- *                  a research centre of the Helmholtz Association.
+ * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  * Copyright © 2012 Lorenzo Galli
  *
  * Authors:
- *   2009-2012 Thomas White <taw@physics.org>
- *   2010      Richard Kirian
- *   2012      Lorenzo Galli
+ *   2009-2012,2014 Thomas White <taw@physics.org>
+ *   2010           Richard Kirian
+ *   2012           Lorenzo Galli
  *
  * This file is part of CrystFEL.
  *
@@ -70,6 +70,8 @@ struct _unitcell {
 
 	CellRepresentation rep;
 
+	int have_parameters;
+
 	/* Crystallographic representation */
 	double a;	/* m */
 	double b;	/* m */
@@ -88,7 +90,6 @@ struct _unitcell {
 	double ays;	double bys;	double cys;
 	double azs;	double bzs;	double czs;
 
-	char        *pointgroup;
 	LatticeType  lattice_type;
 	char         centering;
 	char         unique_axis;
@@ -116,16 +117,16 @@ UnitCell *cell_new()
 	cell->a = 1.0;
 	cell->b = 1.0;
 	cell->c = 1.0;
-	cell->alpha = M_PI_2;
-	cell->beta = M_PI_2;
-	cell->gamma = M_PI_2;
+	cell->alpha = 0.0;
+	cell->beta = 0.0;
+	cell->gamma = 0.0;
 
 	cell->rep = CELL_REP_CRYST;
 
-	cell->pointgroup = strdup("1");
 	cell->lattice_type = L_TRICLINIC;
 	cell->centering = 'P';
 	cell->unique_axis = '?';
+	cell->have_parameters = 0;
 
 	return cell;
 }
@@ -141,8 +142,21 @@ UnitCell *cell_new()
 void cell_free(UnitCell *cell)
 {
 	if ( cell == NULL ) return;
-	free(cell->pointgroup);
 	free(cell);
+}
+
+
+/**
+ * cell_has_parameters:
+ * @cell: A %UnitCell
+ *
+ * Returns: True if @cell has its parameters specified.
+ *
+ */
+int cell_has_parameters(UnitCell *cell)
+{
+	if ( cell == NULL ) return 0;
+	return cell->have_parameters;
 }
 
 
@@ -159,6 +173,7 @@ void cell_set_parameters(UnitCell *cell, double a, double b, double c,
 	cell->gamma = gamma;
 
 	cell->rep = CELL_REP_CRYST;
+	cell->have_parameters = 1;
 }
 
 
@@ -174,30 +189,7 @@ void cell_set_cartesian(UnitCell *cell,
 	cell->cx = cx;  cell->cy = cy;  cell->cz = cz;
 
 	cell->rep = CELL_REP_CART;
-}
-
-
-void cell_set_cartesian_a(UnitCell *cell, double ax, double ay, double az)
-{
-	if ( cell == NULL ) return;
-	cell->ax = ax;  cell->ay = ay;  cell->az = az;
-	cell->rep = CELL_REP_CART;
-}
-
-
-void cell_set_cartesian_b(UnitCell *cell, double bx, double by, double bz)
-{
-	if ( cell == NULL ) return;
-	cell->bx = bx;  cell->by = by;  cell->bz = bz;
-	cell->rep = CELL_REP_CART;
-}
-
-
-void cell_set_cartesian_c(UnitCell *cell, double cx, double cy, double cz)
-{
-	if ( cell == NULL ) return;
-	cell->cx = cx;  cell->cy = cy;  cell->cz = cz;
-	cell->rep = CELL_REP_CART;
+	cell->have_parameters = 1;
 }
 
 
@@ -228,6 +220,7 @@ UnitCell *cell_new_from_reciprocal_axes(struct rvec as, struct rvec bs,
 	cell->cxs = cs.u;  cell->cys = cs.v;  cell->czs = cs.w;
 
 	cell->rep = CELL_REP_RECIP;
+	cell->have_parameters = 1;
 
 	return cell;
 }
@@ -245,6 +238,7 @@ UnitCell *cell_new_from_direct_axes(struct rvec a, struct rvec b, struct rvec c)
 	cell->cx = c.u;  cell->cy = c.v;  cell->cz = c.w;
 
 	cell->rep = CELL_REP_CART;
+	cell->have_parameters = 1;
 
 	return cell;
 }
@@ -259,7 +253,6 @@ UnitCell *cell_new_from_cell(UnitCell *orig)
 
 	cell_get_cartesian(orig, &ax, &ay, &az, &bx, &by, &bz, &cx, &cy, &cz);
 	cell_set_cartesian(new, ax, ay, az, bx, by, bz, cx, cy, cz);
-	cell_set_pointgroup(new, orig->pointgroup);
 	cell_set_lattice_type(new, orig->lattice_type);
 	cell_set_centering(new, orig->centering);
 	cell_set_unique_axis(new, orig->unique_axis);
@@ -280,13 +273,7 @@ void cell_set_reciprocal(UnitCell *cell,
 	cell->cxs = csx;  cell->cys = csy;  cell->czs = csz;
 
 	cell->rep = CELL_REP_RECIP;
-}
-
-
-void cell_set_pointgroup(UnitCell *cell, const char *sym)
-{
-	free(cell->pointgroup);
-	cell->pointgroup = strdup(sym);
+	cell->have_parameters = 1;
 }
 
 
@@ -316,6 +303,11 @@ static int cell_crystallographic_to_cartesian(UnitCell *cell,
                                              double *cx, double *cy, double *cz)
 {
 	double tmp, V, cosalphastar, cstar;
+
+	if ( !cell->have_parameters ) {
+		ERROR("Unit cell has unspecified parameters.\n");
+		return 1;
+	}
 
 	/* Firstly: Get a in terms of x, y and z
 	 * +a (cryst) is defined to lie along +x (cart) */
@@ -434,6 +426,11 @@ int cell_get_parameters(UnitCell *cell, double *a, double *b, double *c,
 
 	if ( cell == NULL ) return 1;
 
+	if ( !cell->have_parameters ) {
+		ERROR("Unit cell has unspecified parameters.\n");
+		return 1;
+	}
+
 	switch ( cell->rep ) {
 
 		case CELL_REP_CRYST:
@@ -490,6 +487,11 @@ int cell_get_cartesian(UnitCell *cell,
 {
 	if ( cell == NULL ) return 1;
 
+	if ( !cell->have_parameters ) {
+		ERROR("Unit cell has unspecified parameters.\n");
+		return 1;
+	}
+
 	switch ( cell->rep ) {
 
 		case CELL_REP_CRYST:
@@ -526,7 +528,13 @@ int cell_get_reciprocal(UnitCell *cell,
 {
 	int r;
 	double ax, ay, az, bx, by, bz, cx, cy, cz;
+
 	if ( cell == NULL ) return 1;
+
+	if ( !cell->have_parameters ) {
+		ERROR("Unit cell has unspecified parameters.\n");
+		return 1;
+	}
 
 	switch ( cell->rep ) {
 
@@ -558,12 +566,6 @@ int cell_get_reciprocal(UnitCell *cell,
 	}
 
 	return 1;
-}
-
-
-const char *cell_get_pointgroup(UnitCell *cell)
-{
-	return cell->pointgroup;
 }
 
 
@@ -697,9 +699,9 @@ UnitCell *cell_transform(UnitCell *cell, UnitCellTransformation *t)
 	out = cell_new_from_cell(cell);
 	if ( out == NULL ) return NULL;
 
-	cell_get_cartesian(out, &ax, &ay, &az,
-	                        &bx, &by, &bz,
-	                        &cx, &cy, &cz);
+	if ( cell_get_cartesian(out, &ax, &ay, &az,
+	                             &bx, &by, &bz,
+	                             &cx, &cy, &cz) ) return NULL;
 
 	m = gsl_matrix_alloc(3,3);
 	a = gsl_matrix_calloc(3,3);

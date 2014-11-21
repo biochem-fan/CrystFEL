@@ -3,15 +3,15 @@
  *
  * Quick yet non-crappy HDF viewer
  *
- * Copyright © 2012 Deutsches Elektronen-Synchrotron DESY,
- *                  a research centre of the Helmholtz Association.
+ * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
- *   2009-2012 Thomas White <taw@physics.org>
- *   2012      Richard Kirian
+ *   2009-2014 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *   2014      Takanori Nakane <nakane.t@gmail.com>
+ *   2012      Richard Kirian
  *
  * This file is part of CrystFEL.
  *
@@ -30,7 +30,6 @@
  *
  */
 
-
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
@@ -38,8 +37,10 @@
 #ifndef DISPLAYWINDOW_H
 #define DISPLAYWINDOW_H
 
+#include "events.h"
+#include "image.h"
 #include <gtk/gtk.h>
-
+#include "stream.h"
 
 typedef struct {
 	GtkWidget	*window;
@@ -81,6 +82,8 @@ typedef struct {
 	GtkWidget	*window;
 	GtkWidget	*drawingarea;
 	GtkWidget	*scrollarea;
+        GtkWidget       *streamwindow;
+	
 	GtkUIManager	*ui;
 	GtkActionGroup	*action_group;
 	int             n_pixbufs;
@@ -90,11 +93,13 @@ typedef struct {
 
 	int             not_ready_yet;
 
-	struct detector *loaded_geom;
 	struct detector *simple_geom;
 
 	struct hdfile	*hdfile;
 	struct image	*image;
+        Stream *stream;
+
+	char            *geom_filename;
 
 	/* Dialog boxes */
 	BinningDialog  *binning_dialog;
@@ -113,7 +118,6 @@ typedef struct {
 	double		boostint;
 	int		noisefilter;	/* Use aggressive noise filter */
 	int             median_filter;
-	int             use_geom;
 	int             show_rings;
 	int		show_peaks;
 	double          ring_radius;
@@ -130,15 +134,22 @@ typedef struct {
 	int		scale;
 	GdkPixbuf	*col_scale;
 
+	int                multi_event;
+	struct event_list  *ev_list;
+	int                curr_event;
+
+
+
 } DisplayWindow;
 
 /* Open an image display window showing the given filename, or NULL */
-extern DisplayWindow *displaywindow_open(const char *filename,
+extern DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
                                          const char *peaks, double boost,
                                          int binning,
-                                         int noisefilter, int calibmode, int colscale,
-                                         const char *element,
-                                         const char *geometry, const char *beam,
+                                         int noisefilter, int calibmode,
+                                         int colscale, const char *element,
+                                         struct detector *det_geom,
+                                         struct beam_params *beam,
                                          int show_rings,
                                          double *ring_radii, int n_rings,
                                          double ring_size, int median_filter);

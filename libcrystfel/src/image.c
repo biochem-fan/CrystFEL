@@ -7,8 +7,9 @@
  *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2011-2014 Thomas White <taw@physics.org>
  *   2014      Kenneth Beyerlein <kenneth.beyerlein@desy.de>
+ *   2014      Takanori Nakane <nakane.t@gmail.com>
+ *   2011-2014 Thomas White <taw@physics.org>
  *
  * This file is part of CrystFEL.
  *
@@ -97,7 +98,14 @@ ImageFeatureList *image_feature_list_new()
 
 void image_feature_list_free(ImageFeatureList *flist)
 {
+	int i;
 	if ( !flist ) return;
+	
+	for ( i=0; i<flist->n_features; i++ ) {
+		if (flist->features[i].name != NULL) {
+			free(flist->features[i].name);
+		}
+	}
 
 	if ( flist->features ) free(flist->features);
 	free(flist);
@@ -172,6 +180,13 @@ void image_remove_feature(ImageFeatureList *flist, int idx)
 	flist->features[idx].valid = 0;
 }
 
+void image_reactivate_features(ImageFeatureList *flist)
+{
+	int idx;
+	for (idx = 0; idx < flist->n_features; idx++) {
+		flist->features[idx].valid = 1;
+	}
+}
 
 void image_add_crystal(struct image *image, Crystal *cryst)
 {

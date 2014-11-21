@@ -3,11 +3,11 @@
  *
  * Invoke GrainSpotter for multi-crystal autoindexing
  *
- * Copyright © 2013 Deutsches Elektronen-Synchrotron DESY,
- *                  a research centre of the Helmholtz Association.
+ * Copyright © 2013-2014 Deutsches Elektronen-Synchrotron DESY,
+ *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2010-2013 Thomas White <taw@physics.org>
+ *   2010-2014 Thomas White <taw@physics.org>
  *
  * This file is part of CrystFEL.
  *
@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <pty.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -42,12 +43,11 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-#if HAVE_FORKPTY_LINUX
-#include <pty.h>
-#elif HAVE_FORKPTY_BSD
-#include <util.h>
+#ifdef HAVE_CLOCK_GETTIME
+#include <time.h>
+#else
+#include <sys/time.h>
 #endif
-
 
 #include "image.h"
 #include "utils.h"
@@ -468,8 +468,7 @@ int grainspotter_index(struct image *image, IndexingPrivate *ipriv)
 
 
 IndexingPrivate *grainspotter_prepare(IndexingMethod *indm, UnitCell *cell,
-                                      struct detector *det,
-                                      struct beam_params *beam, float *ltl)
+                                      struct detector *det, float *ltl)
 {
 	struct grainspotter_private *gp;
 

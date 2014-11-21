@@ -9,6 +9,7 @@
  *
  * Authors:
  *   2009-2014 Thomas White <taw@physics.org>
+ *   2014      Valerio Mariani
  *   2014      Kenneth Beyerlein <kenneth.beyerlein@desy.de>
  *   2011      Andrew Aquila
  *   2011      Richard Kirian <rkirian@asu.edu>
@@ -42,7 +43,6 @@
 #include "image.h"
 #include "utils.h"
 #include "detector.h"
-#include "beam-parameters.h"
 #include "hdf5-file.h"
 
 
@@ -323,7 +323,7 @@ double get_tt(struct image *image, double fs, double ss, int *err)
 
 
 void record_image(struct image *image, int do_poisson, int background,
-                  gsl_rng *rng)
+                  gsl_rng *rng, double beam_radius, double nphotons)
 {
 	int x, y;
 	double total_energy, energy_density;
@@ -338,14 +338,14 @@ void record_image(struct image *image, int do_poisson, int background,
 	int n_nan2 = 0;
 
 	/* How many photons are scattered per electron? */
-	area = M_PI*pow(image->beam->beam_radius, 2.0);
-	total_energy = image->beam->fluence * ph_lambda_to_en(image->lambda);
+	area = M_PI*pow(beam_radius, 2.0);
+	total_energy = nphotons * ph_lambda_to_en(image->lambda);
 	energy_density = total_energy / area;
-	ph_per_e = (image->beam->fluence /area) * pow(THOMSON_LENGTH, 2.0);
+	ph_per_e = (nphotons /area) * pow(THOMSON_LENGTH, 2.0);
 	STATUS("Fluence = %8.2e photons, "
 	       "Energy density = %5.3f kJ/cm^2, "
 	       "Total energy = %5.3f microJ\n",
-	       image->beam->fluence, energy_density/1e7, total_energy*1e6);
+	       nphotons, energy_density/1e7, total_energy*1e6);
 
 	for ( x=0; x<image->width; x++ ) {
 	for ( y=0; y<image->height; y++ ) {
@@ -461,7 +461,27 @@ struct panel *find_panel(struct detector *det, double fs, double ss)
 }
 
 
-void fill_in_values(struct detector *det, struct hdfile *f)
+/* Like find_panel(), but uses the original panel bounds, i.e. referring to
+ * what's in the HDF5 file */
+struct panel *find_orig_panel(struct detector *det, double fs, double ss)
+{
+	int p;
+
+	for ( p=0; p<det->n_panels; p++ ) {
+		if ( (fs >= det->panels[p].orig_min_fs)
+		  && (fs < det->panels[p].orig_max_fs+1)
+		  && (ss >= det->panels[p].orig_min_ss)
+		  && (ss < det->panels[p].orig_max_ss+1) )
+		{
+			return &det->panels[p];
+		}
+	}
+
+	return NULL;
+}
+
+
+void fill_in_values(struct detector *det, struct hdfile *f, struct event* ev)
 {
 	int i;
 
@@ -470,7 +490,13 @@ void fill_in_values(struct detector *det, struct hdfile *f)
 		struct panel *p = &det->panels[i];
 
 		if ( p->clen_from != NULL ) {
-			p->clen = get_value(f, p->clen_from) * 1.0e-3;
+
+
+			if (det->path_dim !=0 || det->dim_dim !=0 ){
+				p->clen = get_ev_based_value(f, p->clen_from, ev) * 1.0e-3;
+			} else {
+				p->clen = get_value(f, p->clen_from) * 1.0e-3;
+			}
 		}
 
 		p->clen += p->coffset;
@@ -494,6 +520,16 @@ static struct panel *new_panel(struct detector *det, const char *name)
 	/* Create a new copy of the camera length location if needed */
 	if ( new->clen_from != NULL ) {
 		new->clen_from = strdup(new->clen_from);
+	}
+
+	/* Create a new copy of the data location if needed */
+	if ( new->data != NULL ) {
+		new->data = strdup(new->data);
+	}
+
+	/* Create a new copy of the bad pixel mask location */
+	if ( new->mask != NULL ) {
+		new->mask = strdup(new->mask);
 	}
 
 	return new;
@@ -666,6 +702,20 @@ static int parse_field_for_panel(struct panel *panel, const char *key,
 			panel->clen_from = NULL;
 		}
 
+	} else if ( strcmp(key, "data") == 0 ) {
+		if ( strncmp(val,"/",1) != 0 ) {
+			ERROR("Invalid data location '%s'\n", val);
+			reject = -1;
+		}
+		panel->data = strdup(val);
+
+	} else if ( strcmp(key, "mask") == 0 ) {
+		if ( strncmp(val,"/",1) != 0 ) {
+			ERROR("Invalid mask location '%s'\n", val);
+			reject = -1;
+		}
+		panel->mask = strdup(val);
+
 	} else if ( strcmp(key, "coffset") == 0) {
 		panel->coffset = atof(val);
 	} else if ( strcmp(key, "res") == 0 ) {
@@ -695,6 +745,11 @@ static int parse_field_for_panel(struct panel *panel, const char *key,
 			ERROR("Invalid slow scan direction '%s'\n", val);
 			reject = 1;
 		}
+	} else if ( strncmp(key, "dim", 3) == 0) {
+		if  ( panel->dim_structure == NULL ) {
+			panel->dim_structure = initialize_dim_structure();
+		}
+		set_dim_structure_entry(panel->dim_structure, key, val);
 	} else {
 		ERROR("Unrecognised field '%s'\n", key);
 	}
@@ -748,14 +803,10 @@ static int parse_field_bad(struct badregion *panel, const char *key,
 }
 
 
-static void parse_toplevel(struct detector *det, const char *key,
-                           const char *val)
+static void parse_toplevel(struct detector *det, struct beam_params *beam,
+                           const char *key, const char *val)
 {
-	if ( strcmp(key, "mask") == 0 ) {
-
-		det->mask = strdup(val);
-
-	} else if ( strcmp(key, "mask_bad") == 0 ) {
+	if ( strcmp(key, "mask_bad") == 0 ) {
 
 		char *end;
 		double v = strtod(val, &end);
@@ -775,6 +826,29 @@ static void parse_toplevel(struct detector *det, const char *key,
 
 	} else if ( strcmp(key, "coffset") == 0 ) {
 		det->defaults.coffset = atof(val);
+
+	} else if ( strcmp(key, "photon_energy") == 0 ) {
+		if ( beam == NULL ) {
+			ERROR("Geometry file contains a reference to "
+			      "photon_energy, which is inappropriate in this "
+			      "situation.\n");
+		} else if ( strncmp(val, "/", 1) == 0 ) {
+			beam->photon_energy = 0.0;
+			beam->photon_energy_from = strdup(val);
+		} else {
+			beam->photon_energy = atof(val);
+			beam->photon_energy_from = NULL;
+		}
+
+	} else if ( strcmp(key, "photon_energy_scale") == 0 ) {
+		if ( beam == NULL ) {
+			ERROR("Geometry file contains a reference to "
+			      "photon_energy_scale, which is inappropriate in "
+			      "this situation.\n");
+		} else {
+			beam->photon_energy_scale = atof(val);
+		}
+
 	} else if ( parse_field_for_panel(&det->defaults, key, val, det) ) {
 		ERROR("Unrecognised top level field '%s'\n", key);
 	}
@@ -839,7 +913,8 @@ static void find_min_max_d(struct detector *det)
 }
 
 
-struct detector *get_detector_geometry(const char *filename)
+struct detector *get_detector_geometry(const char *filename,
+                                       struct beam_params *beam)
 {
 	FILE *fh;
 	struct detector *det;
@@ -847,7 +922,11 @@ struct detector *get_detector_geometry(const char *filename)
 	char **bits;
 	int i;
 	int reject = 0;
+	int path_dim;
+	int dim_dim;
 	int x, y, max_fs, max_ss;
+	int dim_reject = 0;
+	int dim_dim_reject = 0;
 
 	fh = fopen(filename, "r");
 	if ( fh == NULL ) return NULL;
@@ -858,21 +937,32 @@ struct detector *get_detector_geometry(const char *filename)
 		return NULL;
 	}
 
+	if ( beam != NULL ) {
+		beam->photon_energy = -1.0;
+		beam->photon_energy_from = NULL;
+		beam->photon_energy_scale = 1.0;
+	}
+
 	det->n_panels = 0;
 	det->panels = NULL;
 	det->n_bad = 0;
 	det->bad = NULL;
 	det->mask_good = 0;
 	det->mask_bad = 0;
-	det->mask = NULL;
 	det->n_rigid_groups = 0;
 	det->rigid_groups = NULL;
+	det->path_dim = 0;
+	det->dim_dim = 0;
 
 	/* The default defaults... */
 	det->defaults.min_fs = -1;
 	det->defaults.min_ss = -1;
 	det->defaults.max_fs = -1;
 	det->defaults.max_ss = -1;
+	det->defaults.orig_min_fs = -1;
+	det->defaults.orig_min_ss = -1;
+	det->defaults.orig_max_fs = -1;
+	det->defaults.orig_max_ss = -1;
 	det->defaults.cnx = NAN;
 	det->defaults.cny = NAN;
 	det->defaults.clen = -1.0;
@@ -887,6 +977,9 @@ struct detector *get_detector_geometry(const char *filename)
 	det->defaults.rigid_group = NULL;
 	det->defaults.adu_per_eV = NAN;
 	det->defaults.max_adu = +INFINITY;
+	det->defaults.mask = NULL;
+	det->defaults.data = NULL;
+	det->defaults.dim_structure = NULL;
 	strncpy(det->defaults.name, "", 1023);
 
 	do {
@@ -927,7 +1020,7 @@ struct detector *get_detector_geometry(const char *filename)
 		n2 = assplode(bits[0], "/\\.", &path, ASSPLODE_NONE);
 		if ( n2 < 2 ) {
 			/* This was a top-level option, not handled above. */
-			parse_toplevel(det, bits[0], bits[2]);
+			parse_toplevel(det, beam, bits[0], bits[2]);
 			for ( i=0; i<n1; i++ ) free(bits[i]);
 			free(bits);
 			for ( i=0; i<n2; i++ ) free(path[i]);
@@ -975,9 +1068,132 @@ struct detector *get_detector_geometry(const char *filename)
 
 	max_fs = 0;
 	max_ss = 0;
+
+	path_dim = -1;
+	dim_reject = 0;
+
 	for ( i=0; i<det->n_panels; i++ ) {
 
-		if ( det->panels[i].min_fs < 0 ) {
+		int panel_dim = 0;
+		char *next_instance;
+
+		next_instance = det->panels[i].data;
+
+		while ( next_instance ) {
+			next_instance = strstr(next_instance, "%");
+			if ( next_instance != NULL ) {
+				next_instance += 1*sizeof(char);
+				panel_dim += 1;
+			}
+		}
+
+		if ( path_dim == -1 ) {
+			path_dim = panel_dim;
+		} else {
+			if ( panel_dim != path_dim ) {
+				dim_reject = 1;
+			}
+		}
+
+	}
+
+	for ( i=0; i<det->n_panels; i++ ) {
+
+		int panel_mask_dim = 0;
+		char *next_instance;
+
+		if ( det->panels[i].mask != NULL ) {
+
+			next_instance = det->panels[i].mask;
+
+			while(next_instance)
+			{
+				next_instance = strstr(next_instance, "%");
+				if ( next_instance != NULL ) {
+					next_instance += 1*sizeof(char);
+					panel_mask_dim += 1;
+				}
+			}
+
+			if ( panel_mask_dim != path_dim ) {
+				dim_reject = 1;
+			}
+		}
+	}
+
+	if ( dim_reject ==  1) {
+		ERROR("All panels' data and mask entries must have the same number "\
+			"of placeholders\n");
+		reject = 1;
+	}
+
+	det->path_dim = path_dim;
+
+	dim_dim_reject = 0;
+	dim_dim = -1;
+
+	for ( i=0; i<det->n_panels; i++ ) {
+
+		int di;
+		int found_ss = 0;
+		int found_fs = 0;
+		int panel_dim_dim = 0;
+
+		if ( det->panels[i].dim_structure == NULL ) {
+			det->panels[i].dim_structure = default_dim_structure();
+		}
+
+		for ( di=0; di<det->panels[i].dim_structure->num_dims; di++ ) {
+
+			if ( det->panels[i].dim_structure->dims[di] == HYSL_UNDEFINED  ) {
+				dim_dim_reject = 1;
+			}
+			if ( det->panels[i].dim_structure->dims[di] == HYSL_PLACEHOLDER  ) {
+				panel_dim_dim += 1;
+			}
+			if ( det->panels[i].dim_structure->dims[di] == HYSL_SS  ) {
+				found_ss += 1;
+			}
+			if ( det->panels[i].dim_structure->dims[di] == HYSL_FS  ) {
+				found_fs += 1;
+			}
+
+		}
+
+		if ( found_ss != 1 ) {
+			ERROR("Only one slow scan dim coordinate is allowed\n");
+			dim_dim_reject = 1;
+		}
+
+		if ( found_fs != 1 ) {
+			ERROR("Only one fast scan dim coordinate is allowed\n");
+			dim_dim_reject = 1;
+		}
+
+		if ( panel_dim_dim > 1 ) {
+			ERROR("Maximum one placeholder dim coordinate is allowed\n");
+			dim_dim_reject = 1;
+		}
+
+		if ( dim_dim == -1 ) {
+			dim_dim = panel_dim_dim;
+		} else {
+			if ( panel_dim_dim != dim_dim ) {
+				dim_dim_reject = 1;
+			}
+		}
+
+	}
+
+	if ( dim_dim_reject ==  1) {
+		reject = 1;
+	}
+
+	det->dim_dim = dim_dim;
+
+	for ( i=0; i<det->n_panels; i++ ) {
+
+		if ( det->panels[i ].min_fs < 0 ) {
 			ERROR("Please specify the minimum FS coordinate for"
 			      " panel %s\n", det->panels[i].name);
 			reject = 1;
@@ -1023,6 +1239,7 @@ struct detector *get_detector_geometry(const char *filename)
 			      " panel %s\n", det->panels[i].name);
 			reject = 1;
 		}
+
 		/* It's OK if the badrow direction is '0' */
 		/* It's not a problem if "no_index" is still zero */
 		/* The default transformation matrix is at least valid */
@@ -1033,6 +1250,11 @@ struct detector *get_detector_geometry(const char *filename)
 		if ( det->panels[i].max_ss > max_ss ) {
 			max_ss = det->panels[i].max_ss;
 		}
+
+		det->panels[i].orig_max_fs = det->panels[i].max_fs;
+		det->panels[i].orig_min_fs = det->panels[i].min_fs;
+		det->panels[i].orig_max_ss = det->panels[i].max_ss;
+		det->panels[i].orig_min_ss = det->panels[i].min_ss;
 
 	}
 
@@ -1060,6 +1282,12 @@ struct detector *get_detector_geometry(const char *filename)
 		}
 	}
 
+	if ( (beam != NULL) && (beam->photon_energy < -0.5) ) {
+		STATUS("Photon energy must be specified (note: this is now "
+		       "done in the 'geometry' file)\n");
+		reject = 1;
+	}
+
 	for ( x=0; x<=max_fs; x++ ) {
 	for ( y=0; y<=max_ss; y++ ) {
 		if ( find_panel(det, x, y) == NULL ) {
@@ -1075,6 +1303,8 @@ out:
 	det->max_ss = max_ss;
 
 	free(det->defaults.clen_from);
+	free(det->defaults.data);
+	free(det->defaults.mask);
 
 	/* Calculate matrix inverses and other stuff */
 	for ( i=0; i<det->n_panels; i++ ) {
@@ -1126,11 +1356,11 @@ void free_detector_geometry(struct detector *det)
 
 	for ( i=0; i<det->n_panels; i++ ) {
 		free(det->panels[i].clen_from);
+		free_dim_structure(det->panels[i].dim_structure);
 	}
 
 	free(det->panels);
 	free(det->bad);
-	free(det->mask);
 	free(det);
 }
 
@@ -1142,12 +1372,6 @@ struct detector *copy_geom(const struct detector *in)
 
 	out = malloc(sizeof(struct detector));
 	memcpy(out, in, sizeof(struct detector));
-
-	if ( in->mask != NULL ) {
-		out->mask = strdup(in->mask);
-	} else {
-		out->mask = NULL;  /* = in->mask */
-	}
 
 	out->panels = malloc(out->n_panels * sizeof(struct panel));
 	memcpy(out->panels, in->panels, out->n_panels * sizeof(struct panel));
@@ -1166,6 +1390,18 @@ struct detector *copy_geom(const struct detector *in)
 
 		if ( p->clen_from != NULL ) {
 			/* Make a copy of the clen_from fields unique to this
+			 * copy of the structure. */
+			p->clen_from = strdup(p->clen_from);
+		}
+
+		if ( p->data != NULL ) {
+			/* Make a copy of the data fields unique to this
+			 * copy of the structure. */
+			p->clen_from = strdup(p->clen_from);
+		}
+
+		if ( p->clen_from != NULL ) {
+			/* Make a copy of the mask fields unique to this
 			 * copy of the structure. */
 			p->clen_from = strdup(p->clen_from);
 		}
@@ -1202,10 +1438,18 @@ struct detector *simple_geometry(const struct image *image)
 	geom->panels[0].max_fs = image->width-1;
 	geom->panels[0].min_ss = 0;
 	geom->panels[0].max_ss = image->height-1;
+	geom->panels[0].orig_min_fs = 0;
+	geom->panels[0].orig_max_fs = image->width-1;
+	geom->panels[0].orig_min_ss = 0;
+	geom->panels[0].orig_max_ss = image->height-1;
 	geom->panels[0].cnx = -image->width / 2.0;
 	geom->panels[0].cny = -image->height / 2.0;
 	geom->panels[0].rigid_group = NULL;
 	geom->panels[0].max_adu = INFINITY;
+	geom->panels[0].orig_min_fs = -1;
+	geom->panels[0].orig_max_fs = -1;
+	geom->panels[0].orig_min_ss = -1;
+	geom->panels[0].orig_max_ss = -1;
 
 	geom->panels[0].fsx = 1;
 	geom->panels[0].fsy = 0;
@@ -1219,6 +1463,9 @@ struct detector *simple_geometry(const struct image *image)
 
 	geom->panels[0].w = image->width;
 	geom->panels[0].h = image->height;
+
+	geom->panels[0].mask = NULL;
+	geom->panels[0].data = NULL;
 
 	find_min_max_d(geom);
 
@@ -1357,50 +1604,69 @@ void get_pixel_extents(struct detector *det,
 }
 
 
-int write_detector_geometry(const char *filename, struct detector *det)
+int write_detector_geometry(const char *geometry_filename,
+                            const char *output_filename, struct detector *det)
 {
-	struct panel *p;
-	int pi;
+	FILE *ifh;
 	FILE *fh;
 
-	if ( filename == NULL ) return 2;
+	if ( geometry_filename == NULL ) return 2;
+	if ( output_filename == NULL ) return 2;
 	if ( det->n_panels < 1 ) return 3;
 
-	fh = fopen(filename, "w");
+	ifh = fopen(geometry_filename, "r");
+	if ( ifh == NULL ) return 1;
+
+	fh = fopen(output_filename, "w");
 	if ( fh == NULL ) return 1;
 
-	for ( pi=0; pi<det->n_panels; pi++) {
+	do {
 
-		p = &(det->panels[pi]);
+		char *rval;
+		char line[1024];
+		int n_bits;
+		char **bits;
+		int i;
+		struct panel *p;
 
-		if ( p == NULL ) return 4;
+		rval = fgets(line, 1023, ifh);
+		if ( rval == NULL ) break;
 
-		if ( pi > 0 ) fprintf(fh, "\n");
+		n_bits = assplode(line, "/", &bits, ASSPLODE_NONE);
 
-		fprintf(fh, "%s/min_fs = %d\n", p->name, p->min_fs);
-		fprintf(fh, "%s/min_ss = %d\n", p->name, p->min_ss);
-		fprintf(fh, "%s/max_fs = %d\n", p->name, p->max_fs);
-		fprintf(fh, "%s/max_ss = %d\n", p->name, p->max_ss);
-		fprintf(fh, "%s/badrow_direction = %C\n", p->name, p->badrow);
-		fprintf(fh, "%s/res = %g\n", p->name, p->res);
-		fprintf(fh, "%s/clen = %s\n", p->name, p->clen_from);
-		fprintf(fh, "%s/fs = %+fx %+fy\n", p->name, p->fsx, p->fsy);
-		fprintf(fh, "%s/ss = %+fx %+fy\n", p->name, p->ssx, p->ssy);
-		fprintf(fh, "%s/corner_x = %g\n", p->name, p->cnx);
-		fprintf(fh, "%s/corner_y = %g\n", p->name, p->cny);
-		fprintf(fh, "%s/adu_per_eV = %g\n", p->name, p->adu_per_eV);
-		fprintf(fh, "%s/max_adu = %g\n", p->name, p->max_adu);
+		if ( n_bits < 2 || n_bits > 2 ) {
+			for ( i=0; i<n_bits; i++ ) free(bits[i]);
+			fputs(line, fh);
+		} else {
+			p = find_panel_by_name(det, bits[0]);
 
-		if ( p->no_index ) {
-			fprintf(fh, "%s/no_index = 1\n", p->name);
-		} /* else don't clutter up the file */
+			if ( strncmp(bits[1], "fs = ", 5) == 0) {
+				fprintf(fh, "%s/fs = %+fx %+fy\n",
+				        p->name, p->fsx, p->fsy);
 
-		if ( p->rigid_group != NULL ) {
-			fprintf(fh, "%s/rigid_group = %s\n",
-			        p->name, p->rigid_group->name);
+			} else if ( strncmp(bits[1], "ss = ", 5) == 0) {
+				fprintf(fh, "%s/ss = %+fx %+fy\n",
+				        p->name, p->ssx, p->ssy);
+
+			} else if ( strncmp(bits[1], "corner_x = ", 11) == 0) {
+				fprintf(fh, "%s/corner_x = %g\n",
+				        p->name, p->cnx);
+
+			} else if ( strncmp(bits[1], "corner_y = ", 11) == 0) {
+				fprintf(fh, "%s/corner_y = %g\n",
+				        p->name, p->cny);
+
+			} else {
+				fputs(line, fh);
+			}
+
+			for ( i=0; i<n_bits; i++ ) free(bits[i]);
+
 		}
 
-	}
+	} while ( 1 );
+
+	fclose(ifh);
 	fclose(fh);
 
 	return 0;
@@ -1408,7 +1674,7 @@ int write_detector_geometry(const char *filename, struct detector *det)
 
 
 /**
- * mark_resolution_range_as_bad()
+ * mark_resolution_range_as_bad:
  * @image: An image structure
  * @min: Minimum value of 1/d to be marked as bad
  * @max: Maximum value of 1/d to be marked as bad
@@ -1441,4 +1707,44 @@ void mark_resolution_range_as_bad(struct image *image,
 		}
 
 	}
+}
+
+
+extern int single_panel_data_source(struct detector *det, const char *element)
+{
+	int pi;
+	char *first_datafrom = NULL;
+	char *curr_datafrom = NULL;
+
+	if ( det->panels[0].data == NULL ) {
+		if ( element != NULL ) {
+			first_datafrom = strdup(element);
+		} else {
+			first_datafrom = strdup("/data/data");
+		}
+	} else {
+		first_datafrom = strdup(det->panels[0].data);
+	}
+
+	for ( pi=1;pi<det->n_panels;pi++ ) {
+
+		if ( det->panels[pi].data == NULL ) {
+			if ( element != NULL ) {
+				curr_datafrom = strdup(element);
+			} else {
+				curr_datafrom = strdup("/data/data");
+			}
+		} else {
+			curr_datafrom = strdup(det->panels[pi].data);
+		}
+
+		if ( strcmp(curr_datafrom, first_datafrom) != 0 ) {
+			return 0;
+		}
+	}
+
+	free(first_datafrom);
+	free(curr_datafrom);
+
+	return 1;
 }

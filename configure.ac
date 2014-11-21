@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 
-AC_INIT([crystfel],[0.5.3a],[taw@physics.org])
+AC_INIT([crystfel],[0.5.4],[taw@physics.org])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([subdir-objects])
@@ -53,7 +53,7 @@ AS_IF([test "x$with_opencl" == "xyes"],
       [
          AC_MSG_RESULT([${with_opencl_dir}/include/CL/cl.h])
          OPENCL_CFLAGS="-I${with_opencl_dir}/include"
-         OPENCL_LIBS="-lOpenCL"
+         OPENCL_LIBS="-lOpenCL -L${with_opencl_dir}/lib64 -L${with_opencl_dir}/lib"
          cl_cl_h=true
          have_opencl=true
       ], [
@@ -61,7 +61,7 @@ AS_IF([test "x$with_opencl" == "xyes"],
          [
             AC_MSG_RESULT([${with_opencl_dir}/include/cl.h])
             OPENCL_CFLAGS="-I${with_opencl_dir}/include/cl.h/include"
-            OPENCL_LIBS="-lOpenCL"
+            OPENCL_LIBS="-lOpenCL -L${with_opencl_dir}/lib64 -L${with_opencl_dir}/lib"
             cl_cl_h=false
             have_opencl=true
          ], [
@@ -133,18 +133,6 @@ AS_IF([test "x$enable_gtk" != "xno"],
 [
    AC_MSG_RESULT([no])
 ])
-
-
-AC_CHECK_FUNCS(forkpty,
-   AC_DEFINE([HAVE_FORKPTY_BSD], [1],
-             [Define to 1 if a BSD-style forkpty is available]),
-   AC_CHECK_LIB(util,forkpty,
-   [
-      AC_DEFINE([HAVE_FORKPTY_LINUX], [1],
-                [Define to 1 if a Linux-style forkpty is available])
-      LIBS="$LIBS -lutil"
-   ])
-)
 
 
 AC_MSG_CHECKING([whether to use PNG])

@@ -9,8 +9,8 @@
  *
  * Authors:
  *   2009-2014 Thomas White <taw@physics.org>
- *   2012      Richard Kirian
  *   2014      Valerio Mariani
+ *   2012      Richard Kirian
  *
  * This file is part of CrystFEL.
  *
@@ -76,8 +76,11 @@ static void show_help(const char *s)
 "                                               -yellow-white.\n"
 "  -e, --image=<element>            Start up displaying this image from the\n"
 "                                    HDF5 file.  Example: /data/data0.\n"
+"                                    (Only used when a geometry file is not"
+"                                     provided. See option -g)"
 "  -g, --geometry=<filename>        Use geometry from file for display.\n"
-"  -m, --beam=<filename>            Get beam parameters from <filename>.\n"
+"                                   (When this option is used, the value of\n"
+"                                    of the -e parameter is ignored)"
 "\n");
 }
 
@@ -114,6 +117,7 @@ int main(int argc, char *argv[])
 	size_t i;
 	int nfiles;
 	char *peaks = NULL;
+	char *geom_filename = NULL;
 	double boost = 1.0;
 	int binning = 2;
 	int config_noisefilter = 0;
@@ -122,13 +126,14 @@ int main(int argc, char *argv[])
 	int colscale = SCALE_COLOUR;
 	char *cscale = NULL;
 	char *element = NULL;
-	char *geometry = NULL;
-	char *beam = NULL;
 	double ring_size = 5.0;
 	char *reslist = NULL;
 	double ring_radii[128];
 	int n_rings = -1;
 	int median_filter = 0;
+	struct detector *det_geom = NULL;
+	struct beam_params cbeam;
+	struct beam_params *beam = NULL;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -141,7 +146,6 @@ int main(int argc, char *argv[])
 		{"colscale",           1, NULL,               'c'},
 		{"image",              1, NULL,               'e'},
 		{"geometry",           1, NULL,               'g'},
-		{"beam",               1, NULL,               'm'},
 		{"show-rings",         0, &config_showrings,   1},
 		{"ring-size",          1, NULL,                2},
 		{"simple-rings",       1, NULL,               'r'},
@@ -149,6 +153,10 @@ int main(int argc, char *argv[])
 		{"calibration-mode",   0, &config_calibmode,   1},
 		{0, 0, NULL, 0}
 	};
+
+	/* Default beam parameters */
+	cbeam.photon_energy = 0.0;
+	cbeam.photon_energy_from = NULL;
 
 	/* This isn't great, but necessary to make the command-line UI and file
 	 * formats consistent with the other programs, which all use the C
@@ -206,11 +214,15 @@ int main(int argc, char *argv[])
 			break;
 
 			case 'g' :
-			geometry = strdup(optarg);
-			break;
+			geom_filename = strdup(optarg);
+			det_geom = get_detector_geometry(geom_filename, &cbeam);
 
-			case 'm' :
-			beam = strdup(optarg);
+			if ( det_geom == NULL ) {
+				ERROR("Failed to read detector geometry from '%s'\n",
+				       optarg);
+				return 1;
+			}
+			beam = &cbeam;
 			break;
 
 			case 2 :
@@ -284,12 +296,12 @@ int main(int argc, char *argv[])
 	free(cscale);
 
 	for ( i=0; i<nfiles; i++ ) {
-		main_window_list[i] = displaywindow_open(argv[optind+i], peaks,
-		                                         boost, binning,
+		main_window_list[i] = displaywindow_open(argv[optind+i], geom_filename,
+		                                         peaks, boost, binning,
 		                                         config_noisefilter,
-	                                                 config_calibmode,
+		                                         config_calibmode,
 		                                         colscale, element,
-		                                         geometry, beam,
+		                                         det_geom, beam,
 		                                         config_showrings,
 		                                         ring_radii,
 		                                         n_rings,

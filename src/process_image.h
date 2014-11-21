@@ -8,6 +8,7 @@
  *
  * Authors:
  *   2010-2014 Thomas White <taw@physics.org>
+ *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
  *
@@ -89,7 +90,7 @@ struct index_args
 struct pattern_args
 {
 	/* "Input" */
-	char *filename;
+	struct filename_plus_event *filename_p_e;
 
 	/* "Output" */
 	int n_crystals;
@@ -98,7 +99,8 @@ struct pattern_args
 
 extern void process_image(const struct index_args *iargs,
                           struct pattern_args *pargs, Stream *st,
-                          int cookie, const char *tmpdir, int results_pipe);
+                          int cookie, const char *tmpdir, int results_pipe,
+                          int serial);
 
 
 #endif	/* PROCESS_IMAGEs_H */

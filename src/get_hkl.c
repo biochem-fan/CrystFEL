@@ -42,7 +42,6 @@
 #include "utils.h"
 #include "reflist-utils.h"
 #include "symmetry.h"
-#include "beam-parameters.h"
 #include "cell.h"
 #include "cell-utils.h"
 
@@ -411,8 +410,6 @@ int main(int argc, char *argv[])
 	char *input_file = NULL;
 	char *template = NULL;
 	char *output = NULL;
-	char *beamfile = NULL;
-	struct beam_params *beam = NULL;
 	RefList *input;
 	double adu_per_photon = 0.0;
 	int have_adu_per_photon = 0;
@@ -421,7 +418,7 @@ int main(int argc, char *argv[])
 	char *cutoff_str = NULL;
 	double cutiso = 0.0;
 	float cutn1, cutn2, cutn3;
-	char *pdb = NULL;
+	char *cellfile = NULL;
 	char *reindex_str = NULL;
 	SymOpList *reindex = NULL;
 
@@ -448,7 +445,7 @@ int main(int argc, char *argv[])
 	};
 
 	/* Short options */
-	while ((c = getopt_long(argc, argv, "ht:o:i:w:y:e:b:p:",
+	while ((c = getopt_long(argc, argv, "ht:o:i:w:y:e:p:",
 	                        longopts, NULL)) != -1) {
 
 		switch (c) {
@@ -487,7 +484,7 @@ int main(int argc, char *argv[])
 			break;
 
 			case 'p' :
-			pdb = strdup(optarg);
+			cellfile = strdup(optarg);
 			break;
 
 			case 2 :
@@ -551,15 +548,6 @@ int main(int argc, char *argv[])
 		ERROR("You cannot 'twin' and 'expand' at the same time.\n");
 		ERROR("Decide which one you want to do first.\n");
 		return 1;
-	}
-
-	if ( beamfile != NULL ) {
-		beam = get_beam_parameters(beamfile);
-		if ( beam == NULL ) {
-			ERROR("Failed to load beam parameters from '%s'\n",
-			      beamfile);
-			return 1;
-		}
 	}
 
 	if ( holo_str != NULL ) {
@@ -715,18 +703,18 @@ int main(int argc, char *argv[])
 		RefListIterator *iter;
 		UnitCell *cell;
 
-		if ( pdb == NULL ) {
-			ERROR("You must provide a PDB file when using "
+		if ( cellfile == NULL ) {
+			ERROR("You must provide a unit cell when using "
 			      "--cutoff-angstroms.\n");
 			return 1;
 		}
 
-		cell = load_cell_from_pdb(pdb);
+		cell = load_cell_from_file(cellfile);
 		if ( cell == NULL ) {
-			ERROR("Failed to load cell from '%s'\n", pdb);
+			ERROR("Failed to load cell from '%s'\n", cellfile);
 			return 1;
 		}
-		free(pdb);
+		free(cellfile);
 
 		n = reflist_new();
 
@@ -762,18 +750,18 @@ int main(int argc, char *argv[])
 		double csx, csy, csz;
 		double as, bs, cs;
 
-		if ( pdb == NULL ) {
-			ERROR("You must provide a PDB file when using "
+		if ( cellfile == NULL ) {
+			ERROR("You must provide a unit cell when using "
 			      "--cutoff-angstroms.\n");
 			return 1;
 		}
 
-		cell = load_cell_from_pdb(pdb);
+		cell = load_cell_from_file(cellfile);
 		if ( cell == NULL ) {
-			ERROR("Failed to load cell from '%s'\n", pdb);
+			ERROR("Failed to load cell from '%s'\n", cellfile);
 			return 1;
 		}
-		free(pdb);
+		free(cellfile);
 
 		cell_get_reciprocal(cell, &asx, &asy, &asz,
 				          &bsx, &bsy, &bsz,

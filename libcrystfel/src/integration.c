@@ -641,6 +641,7 @@ static void delete_box(struct intcontext *ic, struct peak_box *bx)
 	}
 
 	free(bx->bm);
+	gsl_matrix_free(bx->bgm);
 
 	memmove(&ic->boxes[i], &ic->boxes[i+1],
 	        (ic->n_boxes-i-1)*sizeof(struct peak_box));
@@ -1800,10 +1801,12 @@ static void integrate_rings(IntegrationMethod meth,
 	free_intcontext(&ic);
 
 	crystal_set_num_saturated_reflections(cr, ic.n_saturated);
+	crystal_set_num_implausible_reflections(cr, ic.n_implausible);
 
 	if ( ic.n_implausible ) {
-		STATUS("Warning: %i implausibly negative reflection%s.\n",
-		       ic.n_implausible, ic.n_implausible>1?"s":"");
+		STATUS("Warning: %i implausibly negative reflection%s in %s.\n",
+		       ic.n_implausible, ic.n_implausible>1?"s":"",
+		       image->filename);
 	}
 }
 
@@ -1842,8 +1845,7 @@ void integrate_all_4(struct image *image, IntegrationMethod meth,
 	/* Predict all reflections */
 	for ( i=0; i<image->n_crystals; i++ ) {
 		RefList *list;
-		list = find_intersections(image, image->crystals[i],
-		                          PMODEL_SCSPHERE);
+		list = find_intersections(image, image->crystals[i], pmodel);
 		crystal_set_reflections(image->crystals[i], list);
 	}
 
@@ -1915,7 +1917,8 @@ void integrate_all_2(struct image *image, IntegrationMethod meth,
                      IntDiag int_diag,
                      signed int idh, signed int idk, signed int idl)
 {
-	integrate_all_3(image, meth, PMODEL_SPHERE, 0.0, ir_inn, ir_mid, ir_out,
+	integrate_all_3(image, meth, PMODEL_SCSPHERE, 0.0,
+	                ir_inn, ir_mid, ir_out,
 	                int_diag, idh, idk, idl);
 }
 
