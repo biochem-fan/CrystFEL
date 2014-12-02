@@ -122,6 +122,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	struct image image;
 	int i;
 	int r;
+	int ret;
 	char *rn;
 
 	image.features = NULL;
@@ -237,8 +238,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	 * overlaps can be detected. */
 	integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE, iargs->push_res,
 	                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
-	                iargs->int_diag, iargs->int_diag_h,
-	                iargs->int_diag_k, iargs->int_diag_l, results_pipe);
+	                INTDIAG_NONE, 0, 0, 0, results_pipe);
 
 	for ( i=0; i<image.n_crystals; i++ ) {
 		refine_radius(image.crystals[i]);
@@ -252,9 +252,21 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 			        iargs->int_diag_k, iargs->int_diag_l,
 			        results_pipe);
 
-	write_chunk(st, &image, hdfile,
-	            iargs->stream_peaks, iargs->stream_refls,
-	            pargs->filename_p_e->ev);
+	ret = write_chunk(st, &image, hdfile,
+	                  iargs->stream_peaks, iargs->stream_refls,
+	                  pargs->filename_p_e->ev);
+	if ( ret != 0 ) {
+		ERROR("Error writing stream file.\n");
+	}
+
+	int n = 0;
+	for ( i=0; i<image.n_crystals; i++ ) {
+		n += crystal_get_num_implausible_reflections(image.crystals[i]);
+	}
+	if ( n > 0 ) {
+		STATUS("Warning: %i implausibly negative reflection%s in %s.\n",
+		       n, n>1?"s":"", image.filename);
+	}
 
 	for ( i=0; i<image.n_crystals; i++ ) {
 		cell_free(crystal_get_cell(image.crystals[i]));

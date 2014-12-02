@@ -94,9 +94,9 @@ static void show_help(const char *s)
 "     --background=<N>      Add N photons of Poisson background (default 0).\n"
 "     --template=<file>     Take orientations from stream <file>.\n"
 "     --no-fringes          Exclude the side maxima of Bragg peaks.\n"
-"     --beam-bandwidth     Beam bandwidth as a fraction. Default 1%%.\n"
-"     --photon-energy      Photon energy in eV.  Default 9000.\n"
-"     --nphotons           Number of photons per X-ray pulse.  Default 1e12.\n"
+"     --beam-bandwidth      Beam bandwidth as a fraction. Default 1%%.\n"
+"     --photon-energy       Photon energy in eV.  Default 9000.\n"
+"     --nphotons            Number of photons per X-ray pulse.  Default 1e12.\n"
 );
 }
 
@@ -210,12 +210,12 @@ static struct quaternion read_quaternion()
 }
 
 
-static int random_ncells(double len, double min_nm, double max_nm)
+static int random_ncells(double len, double min_m, double max_m)
 {
 	int min_cells, max_cells, wid;
 
-	min_cells = min_nm*1e-9 / len;
-	max_cells = max_nm*1e-9 / len;
+	min_cells = min_m / len;
+	max_cells = max_m / len;
 	wid = max_cells - min_cells;
 
 	return wid*random()/RAND_MAX + min_cells;
@@ -262,7 +262,7 @@ int main(int argc, char *argv[])
 	SymOpList *sym;
 	int nsamples = 3;
 	gsl_rng *rng;
-	int background = 0;
+	double background = 0.0;
 	char *template_file = NULL;
 	Stream *st = NULL;
 	int no_fringes = 0;
@@ -270,6 +270,7 @@ int main(int argc, char *argv[])
 	double beam_radius = 1e-6;  /* metres */
 	double bandwidth = 0.01;
 	double photon_energy = 9000.0;
+	struct beam_params beam;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -390,6 +391,7 @@ int main(int argc, char *argv[])
 				ERROR("Invalid minimum size.\n");
 				return 1;
 			}
+			min_size /= 1e9;
 			random_size++;
 			break;
 
@@ -399,11 +401,12 @@ int main(int argc, char *argv[])
 				ERROR("Invalid maximum size.\n");
 				return 1;
 			}
+			max_size /= 1e9;
 			random_size++;
 			break;
 
 			case 5 :
-			background = strtol(optarg, &rval, 10);
+			background = strtod(optarg, &rval);
 			if ( *rval != '\0' ) {
 				ERROR("Invalid background level.\n");
 				return 1;
@@ -537,12 +540,19 @@ int main(int argc, char *argv[])
 		ERROR("You need to specify a geometry file with --geometry\n");
 		return 1;
 	}
-	image.det = get_detector_geometry(geometry, NULL);
+	image.beam = &beam;
+	image.det = get_detector_geometry(geometry, image.beam);
 	if ( image.det == NULL ) {
 		ERROR("Failed to read detector geometry from '%s'\n", geometry);
 		return 1;
 	}
 	free(geometry);
+	if ( (beam.photon_energy > 0.0) && (beam.photon_energy_from == NULL) ) {
+		ERROR("WARNING: An explicit photon energy was found in the "
+		      "geometry file.  It will be ignored!\n");
+		ERROR("The value given on the command line "
+		      "(with --photon-energy) will be used instead.\n");
+	}
 
 	if ( spectrum_str == NULL ) {
 		STATUS("You didn't specify a spectrum type, so"
@@ -577,12 +587,11 @@ int main(int argc, char *argv[])
 
 		RefList *reflections;
 
-		reflections = read_reflections2(intfile, image.det);
+		reflections = read_reflections(intfile);
 		if ( reflections == NULL ) {
 			ERROR("Problem reading input file %s\n", intfile);
 			return 1;
 		}
-		free(intfile);
 
 		if ( grad == GRADIENT_PHASED ) {
 			phases = phases_from_list(reflections);
@@ -642,8 +651,42 @@ int main(int argc, char *argv[])
 	powder->data = powder_data;
 
 	/* Splurge a few useful numbers */
-	STATUS("Wavelength is %f nm\n", image.lambda/1.0e-9);
+	STATUS("Simulation parameters:\n");
+	STATUS("                  Photon energy: %.2f eV (wavelength %.5f A)\n",
+	       photon_energy, image.lambda*1e10);
+	STATUS("                Beam divergence: not simulated\n");
+	STATUS("                     Background: %.2f photons\n", background);
 
+	switch ( spectrum_type ) {
+
+		case SPECTRUM_TOPHAT:
+		STATUS("                 X-ray spectrum: top hat, "
+		       "width %.5f %%\n", image.bw*100.0);
+		break;
+
+		case SPECTRUM_SASE:
+		STATUS("                 X-ray spectrum: SASE, "
+		       "bandwidth %.5f %%\n", image.bw*100.0);
+		break;
+
+		case SPECTRUM_TWOCOLOUR:
+		STATUS("                 X-ray spectrum: two colour, "
+		       "separation %.5f %%\n", image.bw*100.0);
+		break;
+	}
+	if ( random_size ) {
+		STATUS("                   Crystal size: random, between "
+		       "%.2f and %.2f nm along each of a, b and c\n",
+		       min_size*1e9, max_size*1e9);
+	} else {
+		STATUS("                   Crystal size: 8 unit cells along "
+		       "each of a, b and c\n");
+	}
+	if ( intfile == NULL ) {
+		STATUS("               Full intensities: all equal");
+	} else {
+		STATUS("               Full intensities: from %s\n", intfile);
+	}
 	do {
 
 		int na, nb, nc;
@@ -752,19 +795,25 @@ int main(int argc, char *argv[])
 	               na, nb, nc, na*a/1.0e-9, nb*b/1.0e-9, nc*c/1.0e-9);
 
 		if ( config_gpu ) {
+
+			int err;
+
 			if ( gctx == NULL ) {
 				gctx = setup_gpu(config_nosfac,
 				                 intensities, flags, sym_str,
 				                 gpu_dev);
 			}
-			get_diffraction_gpu(gctx, &image, na, nb, nc, cell,
-			                    no_fringes);
+			err = get_diffraction_gpu(gctx, &image, na, nb, nc,
+			                          cell, no_fringes);
+			if ( err ) image.data = NULL;
+
 		} else {
 			get_diffraction(&image, na, nb, nc, intensities, phases,
 			                flags, cell, grad, sym, no_fringes);
 		}
 		if ( image.data == NULL ) {
 			ERROR("Diffraction calculation failed.\n");
+			done = 1;
 			goto skip;
 		}
 
@@ -828,6 +877,7 @@ skip:
 	}
 
 	free(image.det->panels);
+	free(intfile);
 	free(image.det);
 	free(powder->data);
 	free(powder);

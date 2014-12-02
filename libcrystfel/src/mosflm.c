@@ -200,18 +200,18 @@ static int check_cell(struct mosflm_private *mp, struct image *image,
 static void mosflm_parseline(const char *line, struct image *image,
                              struct mosflm_data *dirax)
 {
-	#if MOSFLM_VERBOSE
-	char *copy;
-	int i;
+	if ( MOSFLM_VERBOSE || (strncmp(line, "Invocation:", 11) == 0) ) {
+		char *copy;
+		int i;
 
-	copy = strdup(line);
-	for ( i=0; i<strlen(copy); i++ ) {
-		if ( copy[i] == '\r' ) copy[i]='r';
-		if ( copy[i] == '\n' ) copy[i]='\0';
+		copy = strdup(line);
+		for ( i=0; i<strlen(copy); i++ ) {
+			if ( copy[i] == '\r' ) copy[i]='r';
+			if ( copy[i] == '\n' ) copy[i]='\0';
+		}
+		STATUS("MOSFLM: %s\n", copy);
+		free(copy);
 	}
-	STATUS("MOSFLM: %s\n", copy);
-	free(copy);
-	#endif
 }
 
 
@@ -754,7 +754,8 @@ int run_mosflm(struct image *image, IndexingPrivate *ipriv)
 		tcsetattr(STDIN_FILENO, TCSANOW, &t);
 
 		execlp("ipmosflm", "", (char *)NULL);
-		ERROR("Failed to invoke MOSFLM.\n");
+		ERROR("Invocation: Failed to invoke MOSFLM: %s\n",
+		      strerror(errno));
 		_exit(0);
 
 	}
@@ -836,15 +837,20 @@ IndexingPrivate *mosflm_prepare(IndexingMethod *indm, UnitCell *cell,
 	struct mosflm_private *mp;
 	int need_cell = 0;
 
+	/* Check if cell parameters are needed/provided */
 	if ( *indm & INDEXING_CHECK_CELL_COMBINATIONS ) need_cell = 1;
 	if ( *indm & INDEXING_CHECK_CELL_AXES ) need_cell = 1;
-	if ( *indm & INDEXING_USE_LATTICE_TYPE ) need_cell = 1;
-
 	if ( need_cell && !cell_has_parameters(cell) ) {
 		ERROR("Altering your MOSFLM flags because cell parameters were"
 		      " not provided.\n");
 		*indm &= ~INDEXING_CHECK_CELL_COMBINATIONS;
 		*indm &= ~INDEXING_CHECK_CELL_AXES;
+	}
+
+	/* Check if lattice type information is needed/provided */
+	if ( (*indm & INDEXING_USE_LATTICE_TYPE) && (cell == NULL) ) {
+		ERROR("Altering your MOSFLM flags because lattice type "
+		      "information was not provided.\n");
 		*indm &= ~INDEXING_USE_LATTICE_TYPE;
 	}
 
@@ -853,15 +859,19 @@ IndexingPrivate *mosflm_prepare(IndexingMethod *indm, UnitCell *cell,
 	       | INDEXING_CHECK_CELL_AXES | INDEXING_CHECK_PEAKS
 	       | INDEXING_USE_LATTICE_TYPE;
 
-	if ( *indm & INDEXING_USE_LATTICE_TYPE ) {
-		if ( !((*indm & INDEXING_CHECK_CELL_COMBINATIONS)
-		    || (*indm & INDEXING_CHECK_CELL_AXES)) ) {
-			ERROR("WARNING: The unit cell from %s might have had "
-			      "its axes permuted from the unit cell you gave.\n"
-			      "If this is a problem, consider using "
-			      "mosflm-axes-latt or mosflm-comb-latt instead of "
-			      "mosflm-raw-latt.\n", indexer_str(*indm));
-		}
+	if ( (*indm & INDEXING_USE_LATTICE_TYPE)
+	   && !((*indm & INDEXING_CHECK_CELL_COMBINATIONS)
+	       || (*indm & INDEXING_CHECK_CELL_AXES))
+	   && (cell_has_parameters(cell)
+	       || (cell_get_unique_axis(cell) == 'a')
+	       || (cell_get_unique_axis(cell) == 'b')
+	       || (cell_get_unique_axis(cell) == 'c')) )
+	{
+		ERROR("WARNING: The unit cell from %s might have had "
+		      "its axes permuted from the unit cell you gave.\n"
+		      "If this is a problem, consider using "
+		      "mosflm-axes-latt or mosflm-comb-latt instead of "
+		      "mosflm-raw-latt.\n", indexer_str(*indm));
 
 	}
 

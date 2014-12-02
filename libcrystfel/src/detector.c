@@ -322,7 +322,7 @@ double get_tt(struct image *image, double fs, double ss, int *err)
 }
 
 
-void record_image(struct image *image, int do_poisson, int background,
+void record_image(struct image *image, int do_poisson, double background,
                   gsl_rng *rng, double beam_radius, double nphotons)
 {
 	int x, y;
@@ -395,6 +395,9 @@ void record_image(struct image *image, int do_poisson, int background,
 
 		/* Convert to ADU */
 		dval *= p->adu_per_eV * ph_lambda_to_eV(image->lambda);
+
+		/* Saturation */
+		if ( dval > p->max_adu ) dval = p->max_adu;
 
 		image->data[x + image->width*y] = dval;
 
@@ -828,11 +831,7 @@ static void parse_toplevel(struct detector *det, struct beam_params *beam,
 		det->defaults.coffset = atof(val);
 
 	} else if ( strcmp(key, "photon_energy") == 0 ) {
-		if ( beam == NULL ) {
-			ERROR("Geometry file contains a reference to "
-			      "photon_energy, which is inappropriate in this "
-			      "situation.\n");
-		} else if ( strncmp(val, "/", 1) == 0 ) {
+		if ( strncmp(val, "/", 1) == 0 ) {
 			beam->photon_energy = 0.0;
 			beam->photon_energy_from = strdup(val);
 		} else {
@@ -841,11 +840,7 @@ static void parse_toplevel(struct detector *det, struct beam_params *beam,
 		}
 
 	} else if ( strcmp(key, "photon_energy_scale") == 0 ) {
-		if ( beam == NULL ) {
-			ERROR("Geometry file contains a reference to "
-			      "photon_energy_scale, which is inappropriate in "
-			      "this situation.\n");
-		} else {
+		if ( beam != NULL ) {
 			beam->photon_energy_scale = atof(val);
 		}
 
@@ -924,6 +919,7 @@ struct detector *get_detector_geometry(const char *filename,
 	int reject = 0;
 	int path_dim;
 	int dim_dim;
+	int curr_ss;
 	int x, y, max_fs, max_ss;
 	int dim_reject = 0;
 	int dim_dim_reject = 0;
@@ -938,7 +934,7 @@ struct detector *get_detector_geometry(const char *filename,
 	}
 
 	if ( beam != NULL ) {
-		beam->photon_energy = -1.0;
+		beam->photon_energy = 0.0;
 		beam->photon_energy_from = NULL;
 		beam->photon_energy_scale = 1.0;
 	}
@@ -1191,7 +1187,15 @@ struct detector *get_detector_geometry(const char *filename,
 
 	det->dim_dim = dim_dim;
 
+	curr_ss = 0;
+
 	for ( i=0; i<det->n_panels; i++ ) {
+
+		if ( det->panels[i].max_fs-det->panels[i].min_fs+1 !=
+			det->panels[0].max_fs-det->panels[0].min_fs+1 ) {
+			ERROR("All panels should have the same fs extent\n");
+			reject = 1;
+		}
 
 		if ( det->panels[i ].min_fs < 0 ) {
 			ERROR("Please specify the minimum FS coordinate for"
@@ -1244,17 +1248,26 @@ struct detector *get_detector_geometry(const char *filename,
 		/* It's not a problem if "no_index" is still zero */
 		/* The default transformation matrix is at least valid */
 
+		det->panels[i].orig_max_fs = det->panels[i].max_fs;
+		det->panels[i].orig_min_fs = det->panels[i].min_fs;
+		det->panels[i].orig_max_ss = det->panels[i].max_ss;
+		det->panels[i].orig_min_ss = det->panels[i].min_ss;
+
+		det->panels[i].w = det->panels[i].max_fs-det->panels[i].min_fs+1;
+		det->panels[i].h = det->panels[i].max_ss-det->panels[i].min_ss+1;
+
+		det->panels[i].min_fs = 0;
+		det->panels[i].max_fs = det->panels[i].w-1;
+		det->panels[i].min_ss = curr_ss;
+		det->panels[i].max_ss = curr_ss+det->panels[i].h-1;
+		curr_ss += det->panels[i].h;
+
 		if ( det->panels[i].max_fs > max_fs ) {
 			max_fs = det->panels[i].max_fs;
 		}
 		if ( det->panels[i].max_ss > max_ss ) {
 			max_ss = det->panels[i].max_ss;
 		}
-
-		det->panels[i].orig_max_fs = det->panels[i].max_fs;
-		det->panels[i].orig_min_fs = det->panels[i].min_fs;
-		det->panels[i].orig_max_ss = det->panels[i].max_ss;
-		det->panels[i].orig_min_ss = det->panels[i].min_ss;
 
 	}
 
@@ -1280,12 +1293,6 @@ struct detector *get_detector_geometry(const char *filename,
 			      " bad region %s\n", det->bad[i].name);
 			reject = 1;
 		}
-	}
-
-	if ( (beam != NULL) && (beam->photon_energy < -0.5) ) {
-		STATUS("Photon energy must be specified (note: this is now "
-		       "done in the 'geometry' file)\n");
-		reject = 1;
 	}
 
 	for ( x=0; x<=max_fs; x++ ) {
@@ -1470,19 +1477,6 @@ struct detector *simple_geometry(const struct image *image)
 	find_min_max_d(geom);
 
 	return geom;
-}
-
-
-void twod_mapping(double fs, double ss, double *px, double *py,
-                  struct panel *p)
-{
-	double xs, ys;
-
-	xs = fs*p->fsx + ss*p->ssx;
-	ys = fs*p->fsy + ss*p->ssy;
-
-	*px = xs + p->cnx;
-	*py = ys + p->cny;
 }
 
 

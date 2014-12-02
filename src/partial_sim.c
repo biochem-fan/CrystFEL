@@ -390,8 +390,12 @@ static void finalise_job(void *vqargs, void *vwargs)
 	struct worker_args *wargs = vwargs;
 	struct queue_args *qargs = vqargs;
 	int i;
+	int ret;
 
-	write_chunk(qargs->stream, &wargs->image, NULL, 0, 1, NULL);
+	ret = write_chunk(qargs->stream, &wargs->image, NULL, 0, 1, NULL);
+	if ( ret != 0) {
+		ERROR("Warning: error writing stream file.\n");
+	}
 
 	for ( i=0; i<NBINS; i++ ) {
 		qargs->n_ref[i] += wargs->n_ref[i];
@@ -697,6 +701,12 @@ int main(int argc, char *argv[])
 		ERROR("Failed to read geometry from '%s'\n", geomfile);
 		return 1;
 	}
+	if ( (beam.photon_energy > 0.0) && (beam.photon_energy_from == NULL) ) {
+		ERROR("WARNING: An explicit photon energy was found in the "
+		      "geometry file.  It will be ignored!\n");
+		ERROR("The value given on the command line "
+		      "(with --photon-energy) will be used instead.\n");
+	}
 
 	if ( sym_str == NULL ) sym_str = strdup("1");
 	sym = get_pointgroup(sym_str);
@@ -715,7 +725,6 @@ int main(int argc, char *argv[])
 			      input_file);
 			return 1;
 		}
-		free(input_file);
 		if ( check_list_symmetry(full, sym) ) {
 			ERROR("The input reflection list does not appear to"
 			      " have symmetry %s\n", symmetry_name(sym));
@@ -762,6 +771,31 @@ int main(int argc, char *argv[])
 	image.num_saturated_peaks = 0;
 	image.spectrum_size = 0;
 	image.event = NULL;
+
+	STATUS("Simulation parameters:\n");
+	STATUS("                  Photon energy: %.2f eV (wavelength %.5f A)\n",
+	       photon_energy, image.lambda*1e10);
+	STATUS("                Beam divergence: %.5f mrad\n", image.div*1e3);
+	STATUS("                 Beam bandwidth: %.5f %%\n", image.bw*100.0);
+	STATUS("Reciprocal space profile radius: %e m^-1\n", profile_radius);
+	if ( image_prefix != NULL ) {
+		STATUS("                     Background: %.2f detector units\n",
+		       background);
+	} else {
+		STATUS("                     Background: none (no image "
+		       "output\n");
+	}
+	STATUS("               Partiality model: scsphere (hardcoded)\n");
+	STATUS("       Noise standard deviation: %.2f detector units\n",
+	       noise_stddev);
+	if ( random_intensities ) {
+		STATUS("               Full intensities: randomly generated: "
+		       "abs(Gaussian(sigma=%.2f))\n", full_stddev);
+	} else {
+		STATUS("               Full intensities: from %s\n",
+		       input_file);
+	}
+	STATUS("   Max error in cell components: %.2f %%\n", cnoise);
 
 	if ( random_intensities ) {
 		full = reflist_new();
@@ -896,6 +930,7 @@ int main(int argc, char *argv[])
 	reflist_free(full);
 	free(save_file);
 	free(geomfile);
+	free(input_file);
 
 	return 0;
 }

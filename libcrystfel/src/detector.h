@@ -185,7 +185,7 @@ extern double get_tt(struct image *image, double xs, double ys, int *err);
 
 extern int in_bad_region(struct detector *det, double fs, double ss);
 
-extern void record_image(struct image *image, int do_poisson, int background,
+extern void record_image(struct image *image, int do_poisson, double background,
                          gsl_rng *rng, double beam_radius, double nphotons);
 
 extern struct panel *find_panel(struct detector *det, double fs, double ss);
@@ -208,9 +208,6 @@ extern void fill_in_values(struct detector *det, struct hdfile *f,
                            struct event* ev);
 
 extern struct detector *copy_geom(const struct detector *in);
-
-extern void twod_mapping(double fs, double ss, double *px, double *py,
-                         struct panel *p);
 
 extern int reverse_2d_mapping(double x, double y, double *pfs, double *pss,
                               struct detector *det);

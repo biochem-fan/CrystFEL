@@ -358,8 +358,11 @@ static void show_peak_box(struct intcontext *ic, struct peak_box *bx,
 
 	get_indices(bx->refl, &h, &k, &l);
 	get_detector_pos(bx->refl, &fs, &ss);
-	printw("Indices %i %i %i\nPosition fs = %.1f, ss = %.1f\n\n",
-	       h, k, l, fs, ss);
+	/* Convert coordinates to match arrangement of panels in HDF5 file */
+	fs = fs - bx->p->min_fs + bx->p->orig_min_fs;
+	ss = ss - bx->p->min_ss + bx->p->orig_min_ss;
+	printw("Indices %i %i %i\nPanel %s\nPosition fs = %.1f, ss = %.1f\n\n",
+	       h, k, l, bx->p->name, fs, ss);
 
 	printw("Pixel values:\n");
 	for ( q=ic->w-1; q>=0; q-- ) {
@@ -1206,133 +1209,6 @@ static int suitable_reference(struct intcontext *ic, struct peak_box *bx)
 }
 
 
-static void add_to_rg_matrix(struct intcontext *ic, struct panel *p,
-                             gsl_matrix *M, gsl_vector *vx, gsl_vector *vy,
-                             int *pn)
-{
-	int i;
-
-	for ( i=0; i<ic->n_boxes; i++ ) {
-
-		double x, y, w;
-		double fs, ss;
-		double offs_x, offs_y;
-
-		if ( ic->boxes[i].p != p ) continue;
-
-		fs = ic->boxes[i].cfs + ic->halfw;
-		ss = ic->boxes[i].css + ic->halfw;
-
-		twod_mapping(fs, ss, &x, &y, ic->boxes[i].p);
-
-		w = ic->boxes[i].intensity;
-
-		addm(M, 0, 0, w*fs*fs);
-		addm(M, 0, 1, w*fs*ss);
-		addm(M, 0, 2, w*fs);
-		addm(M, 1, 0, w*fs*ss);
-		addm(M, 1, 1, w*ss*ss);
-		addm(M, 1, 2, w*ss);
-		addm(M, 2, 0, w*fs);
-		addm(M, 2, 1, w*ss);
-		addm(M, 2, 2, w);
-
-		/* Offsets in lab coordinate system */
-		offs_x = p->fsx * ic->boxes[i].offs_fs
-		       + p->ssx * ic->boxes[i].offs_ss;
-
-		offs_y = p->fsy * ic->boxes[i].offs_fs
-		       + p->ssy * ic->boxes[i].offs_ss;
-
-		addv(vx, 0, w*offs_x*fs);
-		addv(vx, 1, w*offs_x*ss);
-		addv(vx, 2, w*offs_x);
-
-		addv(vy, 0, w*offs_y*fs);
-		addv(vy, 1, w*offs_y*ss);
-		addv(vy, 2, w*offs_y);
-
-		(*pn)++;
-	}
-}
-
-
-static void UNUSED refine_rigid_groups(struct intcontext *ic)
-{
-	int i;
-
-	for ( i=0; i<ic->image->det->n_rigid_groups; i++ ) {
-
-		struct rigid_group *rg;
-		gsl_matrix *M;
-		gsl_vector *vx;
-		gsl_vector *vy;
-		gsl_vector *dq1;
-		gsl_vector *dq2;
-		int j;
-		int n;
-
-		M = gsl_matrix_calloc(3, 3);
-		if ( M == NULL ) {
-			ERROR("Failed to allocate matrix\n");
-			return;
-		}
-
-		vx = gsl_vector_calloc(3);
-		if ( vx == NULL ) {
-			ERROR("Failed to allocate vector\n");
-			return;
-		}
-
-		vy = gsl_vector_calloc(3);
-		if ( vy == NULL ) {
-			ERROR("Failed to allocate vector\n");
-			return;
-		}
-
-		rg = ic->image->det->rigid_groups[i];
-
-		n = 0;
-		for ( j=0; j<rg->n_panels; j++ ) {
-			add_to_rg_matrix(ic, rg->panels[j], M, vx, vy, &n);
-		}
-
-		if ( n > 10 ) {
-
-			dq1 = solve_svd(vx, M);
-			dq2 = solve_svd(vy, M);
-
-			rg->d_fsx = gsl_vector_get(dq1, 0);
-			rg->d_ssx = gsl_vector_get(dq1, 1);
-			rg->d_cnx = gsl_vector_get(dq1, 2);
-			rg->d_fsy = gsl_vector_get(dq2, 0);
-			rg->d_ssy = gsl_vector_get(dq2, 1);
-			rg->d_cny = gsl_vector_get(dq2, 2);
-			rg->have_deltas = 1;
-
-			gsl_vector_free(dq1);
-			gsl_vector_free(dq2);
-
-		} else {
-
-			rg->d_fsx = 0.0;
-			rg->d_ssx = 0.0;
-			rg->d_cnx = 0.0;
-			rg->d_fsy = 0.0;
-			rg->d_ssy = 0.0;
-			rg->d_cny = 0.0;
-			rg->have_deltas = 0;
-
-		}
-
-		gsl_vector_free(vx);
-		gsl_vector_free(vy);
-		gsl_matrix_free(M);
-
-	}
-}
-
-
 static int get_int_diag(struct intcontext *ic, Reflection *refl)
 {
 	if ( ic->int_diag == INTDIAG_NONE ) return 0;
@@ -1630,9 +1506,10 @@ static void integrate_rings_once(Reflection *refl, struct image *image,
 	sig2_poisson = aduph * intensity;
 
 	/* If intensity is within one photon of nothing, set the Poisson
-	 * error to be one photon */
+	 * error to be one photon.  Pretend I = 1 photon = 1*aduph,
+	 * then sig2_posson = aduph*intensity = aduph^2. */
 	if ( fabs(intensity / aduph) < 1.0 ) {
-		sig2_poisson = aduph;
+		sig2_poisson = aduph * aduph;
 	}
 
 	/* If intensity is negative by more than one photon, assume that
@@ -1802,33 +1679,6 @@ static void integrate_rings(IntegrationMethod meth,
 
 	crystal_set_num_saturated_reflections(cr, ic.n_saturated);
 	crystal_set_num_implausible_reflections(cr, ic.n_implausible);
-
-	if ( ic.n_implausible ) {
-		STATUS("Warning: %i implausibly negative reflection%s in %s.\n",
-		       ic.n_implausible, ic.n_implausible>1?"s":"",
-		       image->filename);
-	}
-}
-
-
-static void apply_resolution_cutoff(Crystal *cr, double res)
-{
-	Reflection *refl;
-	RefListIterator *iter;
-	UnitCell *cell;
-
-	cell = crystal_get_cell(cr);
-
-	for ( refl = first_refl(crystal_get_reflections(cr), &iter);
-	      refl != NULL;
-	      refl = next_refl(refl, iter) )
-	{
-		signed int h, k, l;
-		get_indices(refl, &h, &k, &l);
-		if ( 2.0*resolution(cell, h, k, l) > res ) {
-			set_redundancy(refl, 0);
-		}
-	}
 }
 
 
@@ -1842,11 +1692,22 @@ void integrate_all_4(struct image *image, IntegrationMethod meth,
 	int i;
 	int *masks[image->det->n_panels];
 
+	if ( !(meth & INTEGRATION_RESCUT) ) push_res = +INFINITY;
+
 	/* Predict all reflections */
 	for ( i=0; i<image->n_crystals; i++ ) {
+
 		RefList *list;
-		list = find_intersections(image, image->crystals[i], pmodel);
+		double res;
+
+		res = estimate_resolution(crystal_get_cell(image->crystals[i]),
+		                          image->features);
+		crystal_set_resolution_limit(image->crystals[i], res);
+
+		list = find_intersections_to_res(image, image->crystals[i],
+		                                 pmodel, res+push_res);
 		crystal_set_reflections(image->crystals[i], list);
+
 	}
 
 	for ( i=0; i<image->det->n_panels; i++ ) {
@@ -1855,7 +1716,6 @@ void integrate_all_4(struct image *image, IntegrationMethod meth,
 
 	for ( i=0; i<image->n_crystals; i++ ) {
 
-		double res = INFINITY;
 		Crystal *cr = image->crystals[i];
 
 		switch ( meth & INTEGRATION_METHOD_MASK ) {
@@ -1868,8 +1728,6 @@ void integrate_all_4(struct image *image, IntegrationMethod meth,
 			                int_diag, idh, idk, idl,
 			                ir_inn, ir_mid, ir_out,
 			                results_pipe, masks);
-			res = estimate_resolution(crystal_get_cell(cr),
-			                          image->features);
 			break;
 
 			case INTEGRATION_PROF2D :
@@ -1877,19 +1735,12 @@ void integrate_all_4(struct image *image, IntegrationMethod meth,
 			                 int_diag, idh, idk, idl,
 			                 ir_inn, ir_mid, ir_out,
 			                 results_pipe, masks);
-			res = estimate_resolution(crystal_get_cell(cr),
-			                          image->features);
 			break;
 
 			default :
 			ERROR("Unrecognised integration method %i\n", meth);
 			break;
 
-		}
-
-		crystal_set_resolution_limit(cr, res);
-		if ( meth & INTEGRATION_RESCUT ) {
-			apply_resolution_cutoff(cr, res+push_res);
 		}
 
 	}
