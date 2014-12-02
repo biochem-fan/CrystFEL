@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
     printf("usage: get_rms geometry.geom input.stream > output.csv\n");
     return -1;
   }
-  struct detector *geom = get_detector_geometry(argv[1]);
+  struct detector *geom = get_detector_geometry(argv[1], NULL);
   Stream *st = open_stream_for_read(argv[2]);
   
   if (geom == NULL) {

@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
     printf("Usage: export_to_pickle geometry.geom input.stream | cctbx.python export_to_pickle.py\n");
     return -1;
   }
-  struct detector *geom = get_detector_geometry(argv[1]);
+  struct detector *geom = get_detector_geometry(argv[1], NULL);
   Stream *st = open_stream_for_read(argv[2]);
   
   if (geom == NULL) {
