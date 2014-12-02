@@ -397,7 +397,7 @@ static void run_work(const struct index_args *iargs,
 			FD_ZERO(&fds);
 			FD_SET(bd.fd, &fds);
 
-			tv.tv_sec = 30;
+			tv.tv_sec = 60;
 			tv.tv_usec = 0;
 
 			sval = select(bd.fd+1, &fds, NULL, NULL, &tv);
