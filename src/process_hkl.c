@@ -30,6 +30,14 @@
  *
  */
 
+/*  Takanori Nakane implemented John Spence's EM algorithm.
+ *  Reference: 
+ *
+ *   "The indexing ambiguity in serial femtosecond crystallography (SFX) resolved
+ *    using an expectation maximization algorithm" IUCrJ. 2014 Sep 23;1(Pt 6):393-401 
+ *    by Haiguang Liu and John C.H. Spence
+ *    http://journals.iucr.org/m/issues/2014/06/00/it5003/index.html
+ */
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -56,6 +64,9 @@
 #include "cell-utils.h"
 
 
+// TODO: make this local and dynamically allocated
+int assignments[1000000] = {}; // -1 - flip, 1 - don't flip, 0 - undefined
+
 static void show_help(const char *s)
 {
 	printf("Syntax: %s [options]\n\n", s);
@@ -69,6 +80,8 @@ static void show_help(const char *s)
 "                             Default: processed.hkl).\n"
 "      --stat=<filename>     Specify output filename for merging statistics.\n"
 "  -y, --symmetry=<sym>      Merge according to point group <sym>.\n"
+"      --operator=<sym>      Resolve an ambiguity operator <sym>.\n"
+
 "\n"
 "      --start-after=<n>     Skip <n> crystals at the start of the stream.\n"
 "      --stop-after=<n>      Stop after merging <n> crystals.\n"
@@ -79,6 +92,7 @@ static void show_help(const char *s)
 "\n"
 "      --scale               Scale each pattern for best fit with the current\n"
 "                             model.\n"
+"      --n_cycle=<n>         Do <n> cycles of scaling and/or detwinning.\n"
 "      --no-polarisation     Disable polarisation correction.\n"
 "      --min-measurements=<n> Require at least <n> measurements before a\n"
 "                             reflection appears in the output.  Default: 2\n"
@@ -181,9 +195,9 @@ static double scale_intensities(RefList *reference, RefList *new,
 	return s;
 }
 
-
-static double cc_intensities(RefList *reference, RefList *new,
-                             const SymOpList *sym)
+static double cc_intensities(RefList *reference, RefList *new, Crystal *cr,
+                             const SymOpList *sym, const SymOpList *amb,
+                             double min_snr, double max_adu, double push_res)
 {
 	/* "x" is "reference" */
 	float s_xy = 0.0;
@@ -201,13 +215,29 @@ static double cc_intensities(RefList *reference, RefList *new,
 	      refl != NULL;
 	      refl = next_refl(refl, iter) )
 	{
+		// TODO: refactor filtering
 
-		double i1, i2;
+		double i1, i2, refl_sigma, refl_pk, res, max_res;
 		signed int hu, ku, lu;
 		signed int h, k, l;
 		Reflection *reference_version;
 
+		i2 = get_intensity(refl);
+		refl_sigma = get_esd_intensity(refl);
+		refl_pk = get_peak(refl);
+
+		if ( (min_snr > -INFINITY) && isnan(refl_sigma) ) continue;
+		if ( i2 < min_snr * refl_sigma ) continue;
+		if ( refl_pk > max_adu ) continue;
+
 		get_indices(refl, &h, &k, &l);
+		max_res = push_res + crystal_get_resolution_limit(cr);
+		res = 2.0*resolution(crystal_get_cell(cr), h, k, l);
+		if ( res > max_res ) continue;
+
+		if ( amb != NULL) {
+			get_equiv(amb, NULL, 0, h, k, l, &h, &k, &l);
+		}
 		get_asymm(sym, h, k, l, &hu, &ku, &lu);
 
 		reference_version = find_refl(reference, hu, ku, lu);
@@ -215,7 +245,6 @@ static double cc_intensities(RefList *reference, RefList *new,
 
 		i1 = get_intensity(reference_version);
 		i2 = get_intensity(refl);
-
 
 		s_xy += i1 * i2;
 		s_x += i1;
@@ -255,6 +284,7 @@ static double *check_hist_size(int n, double *hist_vals)
 
 static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
                          RefList *reference, const SymOpList *sym,
+                         const SymOpList *amb, int crystal_id,
                          double **hist_vals, signed int hist_h,
                          signed int hist_k, signed int hist_l, int *hist_n,
                          int config_nopolar, double min_snr, double max_adu,
@@ -264,7 +294,8 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
 	Reflection *refl;
 	RefListIterator *iter;
 	RefList *new_refl;
-	double scale, cc;
+	double scale, cc, cc_flip, cc_keep;
+	int old_assignment;
 
 	new_refl = crystal_get_reflections(cr);
 
@@ -273,20 +304,45 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
 		polarisation_correction(new_refl, crystal_get_cell(cr), image);
 	}
 
+	// TODO: use better RNG
+	if ( assignments[crystal_id] == 0) {
+		if (rand() > RAND_MAX / 2) {
+			assignments[crystal_id] = 1;
+		} else {
+			assignments[crystal_id] = -1;
+		}
+	}
+
 	if ( reference != NULL ) {
 		if ( do_scale ) {
 			scale = scale_intensities(reference, new_refl, sym);
 		} else {
 			scale = 1.0;
 		}
-		cc = cc_intensities(reference, new_refl, sym);
-		if ( cc < min_cc ) return 1;
+		cc_keep = cc_intensities(reference, new_refl, cr, sym, NULL, 
+		                         min_snr, max_adu, push_res);
+		cc_flip = cc_keep;
+		if (amb != NULL) {
+			cc_flip= cc_intensities(reference, new_refl, cr, sym, amb,
+				                min_snr, max_adu, push_res);
+		}
+		old_assignment = assignments[crystal_id];
+		if (cc_keep >= cc_flip) {
+			assignments[crystal_id] = 1;
+		} else {
+			assignments[crystal_id] = -1;
+		}
+
+		cc = (cc_keep > cc_flip) ? cc_keep : cc_flip;
+		if ( cc < min_cc) return 1;
 		if ( isnan(scale) ) return 1;
 		if ( scale <= 0.0 ) return 1;
 		if ( stat != NULL ) {
-			fprintf(stat, "%s %f %f\n", image->filename, scale, cc);
+			char *event = get_event_string(image->event);
+			fprintf(stat, "%s %s %.3f %.3f %.3f %+d %+d\n", image->filename, event, 
+			        scale, cc_keep, cc_flip, old_assignment, assignments[crystal_id]);
+			free(event);
 		}
-
 	} else {
 		scale = 1.0;
 	}
@@ -306,7 +362,7 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
 		refl_intensity = scale * get_intensity(refl);
 		refl_sigma = scale * get_esd_intensity(refl);
 		refl_pk = get_peak(refl);
-		w = 1.0;//pow(refl_sigma, -2.0);
+		w = 1.0; //pow(refl_sigma, -2.0);
 
 		if ( (min_snr > -INFINITY) && isnan(refl_sigma) ) continue;
 		if ( refl_intensity < min_snr * refl_sigma ) continue;
@@ -318,6 +374,10 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
 		max_res = push_res + crystal_get_resolution_limit(cr);
 		res = 2.0*resolution(crystal_get_cell(cr), h, k, l);
 		if ( res > max_res ) continue;
+
+		if ( amb != NULL && assignments[crystal_id] == -1) {
+			get_equiv(amb, NULL, 0, h, k, l, &h, &k, &l);
+		}
 
 		/* Put into the asymmetric unit for the target group */
 		get_asymm(sym, h, k, l, &h, &k, &l);
@@ -381,7 +441,7 @@ static void display_progress(int n_images, int n_crystals, int n_crystals_used)
 
 
 static int merge_all(Stream *st, RefList *model, RefList *reference,
-                     const SymOpList *sym,
+                     const SymOpList *sym, const SymOpList *amb,
                      double **hist_vals, signed int hist_h,
                      signed int hist_k, signed int hist_l,
                      int *hist_i, int config_nopolar, int min_measurements,
@@ -403,7 +463,10 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 		if ( stat == NULL ) {
 			ERROR("Failed to open statistics output file %s\n",
 			      stat_output);
+		} else {
+			fprintf(stat, "FILENAME EVENT SCALE CC_KEEP CC_FLIP OLD_ASSIGN NEW_ASSIGN\n");
 		}
+
 	}
 
 	do {
@@ -433,7 +496,7 @@ static int merge_all(Stream *st, RefList *model, RefList *reference,
 			}
 
 			n_crystals++;
-			r = merge_crystal(model, &image, cr, reference, sym,
+			r = merge_crystal(model, &image, cr, reference, sym, amb, n_crystals,
 			                  hist_vals, hist_h, hist_k, hist_l,
 			                  hist_i, config_nopolar, min_snr,
 			                  max_adu, push_res, min_cc, do_scale, stat);
@@ -490,10 +553,11 @@ int main(int argc, char *argv[])
 	char *output = NULL;
 	char *stat_output = NULL;
 	Stream *st;
-	RefList *model;
+	RefList *model = NULL;
 	int config_scale = 0;
 	char *sym_str = NULL;
 	SymOpList *sym;
+	SymOpList *amb = NULL;
 	char *histo = NULL;
 	signed int hist_h, hist_k, hist_l;
 	signed int hist_nbins=50;
@@ -505,7 +569,6 @@ int main(int argc, char *argv[])
 	int config_nopolar = 0;
 	char *rval;
 	int min_measurements = 2;
-	int r;
 	int start_after = 0;
 	int stop_after = 0;
 	double min_snr = -INFINITY;
@@ -513,7 +576,7 @@ int main(int argc, char *argv[])
 	double min_res = 0.0;
 	double push_res = +INFINITY;
 	double min_cc = -INFINITY;
-	int twopass = 0;
+	int n_cycle = 0;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -537,6 +600,8 @@ int main(int argc, char *argv[])
 		{"version",            0, NULL,                7},
 		{"min-cc",             1, NULL,                8},
 		{"stat",               1, NULL,                9},
+		{"operator",           1, NULL,               10},
+		{"n_cycle",            1, NULL,               11},
 		{0, 0, NULL, 0}
 	};
 
@@ -654,12 +719,39 @@ int main(int argc, char *argv[])
 				ERROR("Invalid value for --min-cc.\n");
 				return 1;
 			}
-			twopass = 1;
+			if (n_cycle < 2) n_cycle = 2;
 			break;
 
 			case 9 :
 			stat_output = strdup(optarg);
-			twopass = 1;
+			if (n_cycle < 2) n_cycle = 2;
+			break;
+
+			case 10 :
+			if ( amb != NULL ) {
+				ERROR("Only one ambiguity operator is allowed.\n");
+				return 1;
+			}
+
+			amb = parse_symmetry_operations(optarg);
+			if ( amb == NULL ) {
+				ERROR("Failed to parse an ambiguity operator.\n");
+				return 1;
+			}
+			printf("An ambiguity operator was specified.\n");
+			printf("We will use J. Spence's EM algorithm (IUCrJ. 2014 Sep;1(Pt 6):393-401).\n");
+			set_symmetry_name(amb, "Ambiguity");
+			if (n_cycle < 2) n_cycle = 5;
+			break;
+
+			case 11 :
+			errno = 0;
+			n_cycle = strtod(optarg, &rval);
+			if ( *rval != '\0' ) {
+				ERROR("Invalid value for n_cycle.\n");
+				return 1;
+			}
+			if (n_cycle < 2) n_cycle = 2;
 			break;
 
 			case 0 :
@@ -738,20 +830,12 @@ int main(int argc, char *argv[])
 	}
 
 	/* Need to do a second pass if we are scaling */
-	if ( config_scale ) twopass = 1;
-
+	if ( config_scale && n_cycle < 2) n_cycle = 2;
+	
 	hist_i = 0;
-	r = merge_all(st, model, NULL, sym, &hist_vals, hist_h, hist_k, hist_l,
-	              &hist_i, config_nopolar, min_measurements, min_snr,
-	              max_adu, start_after, stop_after, min_res, push_res,
-	              min_cc, config_scale, stat_output);
-	fprintf(stderr, "\n");
-	if ( r ) {
-		ERROR("Error while reading stream.\n");
-		return 1;
-	}
 
-	if ( twopass ) {
+	int j;
+	for ( j = 0; j < n_cycle; j++ ) {
 
 		RefList *reference;
 
@@ -764,7 +848,7 @@ int main(int argc, char *argv[])
 
 			int r;
 
-			STATUS("Second pass for scaling and/or CCs...\n");
+			STATUS("Pass %d of %d ...\n", j + 1, n_cycle);
 
 			reference = model;
 			model = reflist_new();
@@ -775,12 +859,14 @@ int main(int argc, char *argv[])
 				hist_i = 0;
 			}
 
-			r = merge_all(st, model, reference, sym, &hist_vals,
+			char stat_file[1024];
+			snprintf(stat_file, 1024, "%s.%d", stat_output, j + 1);
+			r = merge_all(st, model, reference, sym, amb, &hist_vals,
 			              hist_h, hist_k, hist_l, &hist_i,
 				      config_nopolar, min_measurements, min_snr,
 				      max_adu, start_after, stop_after, min_res,
 				      push_res, min_cc, config_scale,
-				      stat_output);
+				      stat_file);
 			fprintf(stderr, "\n");
 			if ( r ) {
 				ERROR("Error while reading stream.\n");
@@ -809,6 +895,9 @@ int main(int argc, char *argv[])
 	close_stream(st);
 
 	free_symoplist(sym);
+	if ( amb != NULL) {
+		free_symoplist(amb);
+	}
 	reflist_free(model);
 	free(output);
 	free(filename);
