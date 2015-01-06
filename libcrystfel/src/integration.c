@@ -1341,7 +1341,7 @@ static void setup_profile_boxes(struct intcontext *ic, RefList *list)
 		bx->pn = pn;
 
 		/* Which reference profile? */
-		bx->rp = 0;//bx->pn;
+		bx->rp = bx->pn;
 
 		if ( ic->meth & INTEGRATION_CENTER ) {
 			r = center_and_check_box(ic, bx, &saturated);
