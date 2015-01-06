@@ -18,7 +18,9 @@ import sys
 
 # This will be overwritten by values in .phil but still you need it!
 # This field in pickle is named 'pointgroup' but actually seems to be space group...
-Pointgroup = "P43212"
+Pointgroup = "4mm"
+Spacegroup = "I422" # TODO: use this
+Distance = 51.5
 
 i_cryst = 0
 
@@ -75,7 +77,7 @@ while (True):
     save_to_pickle = {'xbeam': 0, 'ybeam': 0, 'wavelength': wavelength,
                       'pointgroup': point_group,
                       'mapped_predictions': [mapped_predictions],
-                      'observations': [observations],
+                      'observations': [observations], 'distance': Distance,
                       'current_orientation': [current_orientation]}
         
     pickle.dump(save_to_pickle, open("%d.pickle" % i_cryst, "wb"))
