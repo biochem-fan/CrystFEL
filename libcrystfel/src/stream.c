@@ -325,6 +325,7 @@ static RefList *read_stream_reflections_2_3(FILE *fh, struct detector *det)
 			set_esd_intensity(refl, sigma);
 			set_peak(refl, pk);
 			set_mean_bg(refl, bg);
+			set_redundancy(refl, 1);
 		}
 
 	} while ( rval != NULL );
@@ -781,8 +782,8 @@ int write_chunk(Stream *st, struct image *i, struct hdfile *hdfile,
 	fprintf(st->fh, "photon_energy_eV = %f\n",
 	        J_to_eV(ph_lambda_to_en(i->lambda)));
 
-	fprintf(st->fh, "beam_divergence = %.5f mrad\n", i->div*1e3);
-	fprintf(st->fh, "beam_bandwidth = %.5f %%\n", i->bw*100.0);
+	fprintf(st->fh, "beam_divergence = %.2e rad\n", i->div);
+	fprintf(st->fh, "beam_bandwidth = %.2e (fraction)\n", i->bw);
 
 	copy_hdf5_fields(hdfile, i->copyme, st->fh, ev);
 
@@ -966,7 +967,7 @@ static void read_crystal(Stream *st, struct image *image, StreamReadFlags srf)
 			crystal_set_resolution_limit(cr, lim*1e9);
 		}
 
-		if ( sscanf(line, "profile_radius = %f nm^-1", &rad) == 1 ) {
+		if ( sscanf(line, "profile_radius = %e nm^-1", &rad) == 1 ) {
 			crystal_set_profile_radius(cr, rad*1e9);
 		}
 
@@ -1097,8 +1098,8 @@ int read_chunk_2(Stream *st, struct image *image,  StreamReadFlags srf)
 			have_ev = 1;
 		}
 
-		if ( sscanf(line, "beam_divergence = %f mrad", &div) == 1 ) {
-			image->div = div/1e3;
+		if ( sscanf(line, "beam_divergence = %e rad", &div) == 1 ) {
+			image->div = div;
 		}
 
 		if ( sscanf(line, "beam_bandwidth = %f %%", &bw) == 1 ) {

@@ -784,7 +784,7 @@ static gint displaywindow_set_boostint_response(GtkWidget *widget,
 		int scanval;
 
 		sboostint = gtk_entry_get_text(
-		 			GTK_ENTRY(dw->boostint_dialog->entry));
+                                         GTK_ENTRY(dw->boostint_dialog->entry));
 		scanval = sscanf(sboostint, "%f", &boostint);
 		if ( (scanval != 1) || (boostint <= 0) ) {
 			displaywindow_error(dw, "Please enter a positive "
@@ -1088,23 +1088,41 @@ static void load_features_from_file(struct image *image, const char *filename)
 		/* Try long peak format from stream */
 		r = sscanf(line, "%f %f %f %f %s", &fs, &ss, &d,
 		           &intensity, pn);
-		if ( r != 5 ) continue;
+		if ( r == 5 ) {
 
-		p = find_panel_by_name(image->det, pn);
-		if ( p == NULL ) {
-			ERROR("Unable to find panel %s "
-			      "(no geometry file given?)\n", pn);
-		} else {
+			p = find_panel_by_name(image->det, pn);
+			if ( p == NULL ) {
+				ERROR("Unable to find panel %s "
+				      "(no geometry file given?)\n", pn);
+			} else {
 
-			/* Convert coordinates to match rearranged panels in
-			 * memory */
-			fs = fs - p->orig_min_fs + p->min_fs;
-			ss = ss - p->orig_min_ss + p->min_ss;
+				/* Convert coordinates to match rearranged panels in
+				 * memory */
+				fs = fs - p->orig_min_fs + p->min_fs;
+				ss = ss - p->orig_min_ss + p->min_ss;
+
+			}
+
+			image_add_feature(image->features, fs, ss, image, 1.0,
+			                  "peak");
+		} else if ( r == 4 ) {
+
+			p = find_orig_panel(image->det, fs, ss);
+
+			if ( p == NULL ) {
+				ERROR("Unable to find panel "
+				      "(no geometry file given?)\n");
+			} else {
+
+				/* Convert coordinates to match rearranged
+				 * panels in memory */
+				fs = fs - p->orig_min_fs + p->min_fs;
+				ss = ss - p->orig_min_ss + p->min_ss;
+			}
+			image_add_feature(image->features, fs, ss, image, 1.0,
+			                  "peak");
 
 		}
-
-		image_add_feature(image->features, fs, ss, image, 1.0, "peak");
-
 
 	} while ( rval != NULL );
 
@@ -1804,7 +1822,7 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 
 			nh = malloc(sizeof(struct newhdf));
 			if ( nh != NULL ) {
-		        	strncpy(nh->name, names[i], 1023);
+				strncpy(nh->name, names[i], 1023);
 				nh->dw = dw;
 				nh->widget = item;
 				g_signal_connect(G_OBJECT(item), "toggled",
@@ -1813,7 +1831,7 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 
 			if ( (selectme != NULL)
 			  && (strcmp(names[i], selectme) == 0) ) {
-			  	gtk_check_menu_item_set_active(
+				gtk_check_menu_item_set_active(
 				               GTK_CHECK_MENU_ITEM(item), TRUE);
 			} else {
 				gtk_check_menu_item_set_active(
@@ -1917,7 +1935,7 @@ static gint displaywindow_newevent(GtkMenuItem *item, struct newev *ne)
 	int **old_bad = ne->dw->image->bad;
 
 	fail = hdf5_read2(ne->dw->hdfile, ne->dw->image,
-                      ne->dw->ev_list->events[ne->new_ev], 0);
+                          ne->dw->ev_list->events[ne->new_ev], 0);
 	if ( fail ) {
 		ERROR("Couldn't load image");
 		return 1;
@@ -1949,12 +1967,10 @@ static int displaywindow_update_event_menu(DisplayWindow *dw,
 	GtkWidget *ww;
 	GSList *grp = NULL;
 
-	w = gtk_ui_manager_get_widget(dw->ui,
-	                              "/ui/displaywindow/events");
-
+	w = gtk_ui_manager_get_widget(dw->ui, "/ui/displaywindow/events");
 	ww = gtk_menu_new();
 
-	for ( ei=0; ei< ev_list->num_events; ei++ ) {
+	for ( ei=0; ei<ev_list->num_events; ei++ ) {
 
 		GtkWidget *www;
 		struct newev *ne;
@@ -1977,24 +1993,23 @@ static int displaywindow_update_event_menu(DisplayWindow *dw,
 		}
 
 		if ( ei == dw->curr_event ) {
-			gtk_check_menu_item_set_active(
-			             GTK_CHECK_MENU_ITEM(www), TRUE);
+			gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(www),
+			                               TRUE);
 		} else {
-			gtk_check_menu_item_set_active(
-			             GTK_CHECK_MENU_ITEM(www), FALSE);
+			gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(www),
+			                               FALSE);
 		}
 
 		gtk_menu_shell_append(GTK_MENU_SHELL(ww), www);
 
 		grp = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(www));
+		gtk_widget_show_all(www);
 
 	}
 
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(w), ww);
-	gtk_widget_show_all(w);
 
 	return 0;
-
 }
 
 
@@ -2451,7 +2466,7 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
                                   const char *peaks,
                                   double boost, int binning,
                                   int noisefilter, int calibmode, int colscale,
-                                  const char *element,
+                                  const char *element, const char *event,
                                   struct detector *det_geom,
                                   struct beam_params *beam,
                                   int show_rings, double *ring_radii,
@@ -2496,7 +2511,6 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	dw->calib_mode_show_focus = 1;
 	dw->statusbar = NULL;
 	dw->multi_event = 0;
-	dw->curr_event = 0;
 	dw->ev_list = NULL;
 	if ( geom_filename != NULL ) {
 		dw->geom_filename = strdup(geom_filename);
@@ -2546,9 +2560,20 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	if ( dw->image->det != NULL ) {
 
 		if ( dw->multi_event ) {
-			check = hdf5_read2(dw->hdfile, dw->image,
-			                   dw->ev_list->events[dw->curr_event],
-			                   0);
+			struct event *ev;
+			if ( event != NULL ) {
+				ev = get_event_from_event_string(event);
+				dw->curr_event = find_event(ev, dw->ev_list);
+				if ( dw->curr_event == dw->ev_list->num_events)
+				{
+					ERROR("Invalid event\n");
+					return NULL;
+				}
+			} else {
+				dw->curr_event = 0;
+				ev = dw->ev_list->events[dw->curr_event];
+			}
+			check = hdf5_read2(dw->hdfile, dw->image, ev, 0);
 		} else {
 			check = hdf5_read2(dw->hdfile, dw->image, NULL, 0);
 		}
@@ -2616,8 +2641,7 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
 	}
 
-	ww = gtk_ui_manager_get_widget(dw->ui,
-	                  "/ui/displaywindow/events");
+	ww = gtk_ui_manager_get_widget(dw->ui, "/ui/displaywindow/events");
 
 	if ( dw->image->det == dw->simple_geom || dw->multi_event == 0) {
 		gtk_widget_set_sensitive(GTK_WIDGET(ww), FALSE);
@@ -2644,7 +2668,7 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	if ( dw->image->det == dw->simple_geom ) {
 		displaywindow_update_menus(dw, element);
 	} else {
-		if ( dw->multi_event != 0 ) {
+		if ( dw->multi_event ) {
 			displaywindow_update_event_menu(dw, dw->ev_list,
 			                                dw->curr_event);
 		}

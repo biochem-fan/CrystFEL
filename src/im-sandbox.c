@@ -268,6 +268,8 @@ struct buffer_data
 	int fd;
 	int rbufpos;
 	int rbuflen;
+	int eof;
+	int err;
 };
 
 
@@ -276,8 +278,19 @@ static int read_fpe_data(struct buffer_data *bd)
 	int rval;
 	int no_line = 0;
 
+	bd->eof = 0;
+	bd->err = 0;
+
 	rval = read(bd->fd, bd->rbuffer+bd->rbufpos, bd->rbuflen-bd->rbufpos);
-	if ( (rval == -1) || (rval == 0) ) return 1;
+	if ( rval == 0 ) {
+		bd->eof = 1;
+		return 1;
+	}
+	if ( rval == -1 ) {
+		bd->err = 1;
+		return 1;
+	}
+
 	bd->rbufpos += rval;
 	assert(bd->rbufpos <= bd->rbuflen);
 
@@ -285,15 +298,14 @@ static int read_fpe_data(struct buffer_data *bd)
 
 		int i;
 		int line_ready = 0;
-		int line_end = 0;
+		int line_length = 0;
 
 		/* See if there's a full line in the buffer yet */
 		for ( i=0; i<bd->rbufpos; i++ ) {
 
 			/* Is there a line in the buffer? */
 			if ( bd->rbuffer[i] == '\n' ) {
-				bd->rbuffer[i] = '\0';
-				line_end = i;
+				line_length = i+1;
 				line_ready = 1;
 				break;
 			}
@@ -308,17 +320,19 @@ static int read_fpe_data(struct buffer_data *bd)
 				free(bd->line);
 			}
 
-			bd->line = strdup(bd->rbuffer);
+			bd->line = malloc(line_length+1);
+			strncpy(bd->line, bd->rbuffer, line_length);
+			bd->line[line_length] = '\0';
 
 			/* Now the block's been parsed, it should be
 			 * forgotten about */
 			memmove(bd->rbuffer,
-			        bd->rbuffer + line_end + 1,
-			        bd->rbuflen - line_end - 1);
+			        bd->rbuffer + line_length,
+			        bd->rbuflen - line_length);
 
 			/* Subtract the number of bytes removed */
-			bd->rbufpos = bd->rbufpos - line_end - 1;
-			new_rbuflen = bd->rbuflen - line_end - 1 ;
+			bd->rbufpos = bd->rbufpos - line_length;
+			new_rbuflen = bd->rbuflen - line_length;
 			if ( new_rbuflen == 0 ) new_rbuflen = 256;
 			bd->rbuffer = realloc(bd->rbuffer,
 			                      new_rbuflen*sizeof(char));
@@ -358,6 +372,8 @@ static void run_work(const struct index_args *iargs,
 	bd.rbufpos = 0;
 	bd.line = NULL;
 	bd.fd = 0;
+	bd.eof = 0;
+	bd.err = 1;
 
 	fh = fdopen(filename_pipe, "r");
 	if ( fh == NULL ) {
@@ -380,11 +396,9 @@ static void run_work(const struct index_args *iargs,
 
 		struct pattern_args pargs;
 		int  c;
-		int error;
 		int rval;
 		char buf[1024];
 
-		error = 0;
 		pargs.filename_p_e = initialize_filename_plus_event();
 
 		rval = 0;
@@ -423,23 +437,28 @@ static void run_work(const struct index_args *iargs,
 				rval = read_fpe_data(&bd);
 			} else {
 				ERROR("No data sent from main process..\n");
-				rval = 1;
-				error = 1;
+				/* Not actually an error condition.  The main
+				 * process might just be taking a while to read
+				 * the index data for a large multi-event file.
+				 */
 			}
 
 		} while ( !rval );
 
-		if ( error == 1 ) {
+		if ( bd.err ) {
+			ERROR("Event pipe read error: %s\n", strerror(errno));
 			allDone = 1;
 			continue;
 		}
 
-		chomp(bd.line);
-
-		if ( strlen(bd.line) == 0 ) {
-
+		if ( bd.eof ) {
+			ERROR("Event pipe EOF (should not happen).\n");
 			allDone = 1;
+			continue;
+		}
 
+		if ( bd.line[0] == '\n' ) {
+			allDone = 1;
 		} else {
 
 			char filename[1024];
@@ -447,14 +466,22 @@ static void run_work(const struct index_args *iargs,
 			struct event* ev;
 			int ser;
 
+			chomp(bd.line);
+
 			sscanf(bd.line, "%s %s %i", filename, event_str, &ser);
 			pargs.filename_p_e->filename = strdup(filename);
+
+			/* Make absolutely sure the same event won't be
+			 * processed a second time */
+			bd.line[0] = '\0';
 
 			if ( strcmp(event_str, "/") != 0 ) {
 
 				ev = get_event_from_event_string(event_str);
 				if ( ev == NULL ) {
-					ERROR("Error in event recovery\n");
+					ERROR("Bad event string '%s'\n",
+					      event_str);
+					continue;
 				}
 
 				pargs.filename_p_e->ev = ev;
@@ -1082,12 +1109,14 @@ void create_sandbox(struct index_args *iargs, int n_proc, char *prefix,
 
 			if ( strcmp(results, "SUSPEND") == 0 ) {
 				sb->suspend_stats++;
+				continue;  /* Do not send next filename */
 			} else if ( strcmp(results, "RELEASE") == 0 ) {
 				if ( sb->suspend_stats > 0 ) {
 					sb->suspend_stats--;
 				} else {
 					ERROR("RELEASE before SUSPEND.\n");
 				}
+				continue;  /* Do not send next filename */
 			} else {
 
 				strtol(results, &eptr, 10);

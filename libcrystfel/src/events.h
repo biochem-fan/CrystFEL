@@ -33,8 +33,6 @@
 #ifndef EVENTS_H
 #define EVENTS_H
 
-#include "detector.h"
-
 struct event
 {
 	char **path_entries;
@@ -77,7 +75,7 @@ extern int pop_dim_entry_from_event(struct event *ev);
 extern struct event *copy_event(struct event *ev);
 extern void free_event(struct event *ev);
 extern char *get_event_string(struct event *ev);
-extern struct event *get_event_from_event_string(char *ev_string);
+extern struct event *get_event_from_event_string(const char *ev_string);
 extern char *event_path_placeholder_subst(const char *ev_name,
                                           const char *data);
 extern char *partial_event_substitution(struct event *ev, const char *data);
@@ -94,6 +92,7 @@ extern int append_event_to_event_list(struct event_list *ev_list,
 int add_non_existing_event_to_event_list(struct event_list *ev_list,
                                          struct event *ev);
 extern struct event_list *copy_event_list(struct event_list *el);
+extern int find_event(struct event *ev, struct event_list *el);
 extern void free_event_list(struct event_list *el);
 
 

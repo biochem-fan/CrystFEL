@@ -83,7 +83,6 @@ struct filename_plus_event *initialize_filename_plus_event()
 
 int event_cmp(struct event *ev1, struct event *ev2)
 {
-
 	int pi;
 	int di;
 
@@ -112,7 +111,6 @@ int event_cmp(struct event *ev1, struct event *ev2)
 int add_non_existing_event_to_event_list(struct event_list *ev_list,
                                          struct event *ev)
 {
-
 	int evi;
 	int found = 0;
 
@@ -133,7 +131,6 @@ int add_non_existing_event_to_event_list(struct event_list *ev_list,
 
 int append_event_to_event_list(struct event_list *ev_list, struct event *ev)
 {
-
 	struct event **new_el;
 
 	new_el = realloc(ev_list->events,
@@ -151,7 +148,6 @@ int append_event_to_event_list(struct event_list *ev_list, struct event *ev)
 
 struct event *copy_event(struct event *ev)
 {
-
 	struct event *new_ev;
 	int pi, di;
 
@@ -209,6 +205,48 @@ struct event_list *copy_event_list(struct event_list *el)
 	return el_copy;
 }
 
+
+static int events_equal(struct event *ev1, struct event *ev2)
+{
+	int i;
+
+	if ( ev1->path_length != ev2->path_length ) return 0;
+	if ( ev1->dim_length != ev2->dim_length ) return 0;
+
+	for ( i=0; i<ev1->path_length; i++ ) {
+		if ( strcmp(ev1->path_entries[i], ev2->path_entries[i]) != 0 ) {
+			return 0;
+		}
+	}
+
+	for ( i=0; i<ev1->dim_length; i++ ) {
+		if ( ev1->dim_entries[i] != ev2->dim_entries[i] ) return 0;
+	}
+
+	return 1;
+}
+
+
+/**
+ * find_event:
+ * @ev: An event structure
+ * @el: An event list
+ *
+ * Returns: the indexing into @el of the event matching @ev, of el->num_events
+ * if no such event is found.
+ **/
+int find_event(struct event *ev, struct event_list *el)
+{
+	int i;
+
+	if ( ev == NULL ) return el->num_events;
+
+	for ( i=0; i<el->num_events; i++ ) {
+		if ( events_equal(ev, el->events[i]) ) return i;
+	}
+
+	return i;
+}
 
 
 void free_event(struct event *ev)
@@ -295,7 +333,7 @@ char *get_event_string(struct event *ev)
 	} else {
 
 		ret_string = strdup("/");
-		ret_string_len = strlen(ret_string);
+		ret_string_len = 1;
 
 	}
 
@@ -314,11 +352,11 @@ char *get_event_string(struct event *ev)
 				return NULL;
 			}
 
-			ret_string=new_ret_string;
+			ret_string = new_ret_string;
 
 			strncpy(&ret_string[ret_string_len],"/", 1);
 			strncpy(&ret_string[ret_string_len+1], num_buf,
-                    strlen(num_buf));
+			strlen(num_buf));
 			ret_string_len += 1+strlen(num_buf);
 
 		}
@@ -352,7 +390,7 @@ char *get_event_string(struct event *ev)
 }
 
 
-struct event *get_event_from_event_string(char *ev_string)
+struct event *get_event_from_event_string(const char *ev_string)
 {
 	struct event *ev;
 	char *ev_sep;
@@ -543,7 +581,6 @@ char *event_path_placeholder_subst(const char *entry,
 
 char *retrieve_full_path(struct event *ev, const char *data)
 {
-
 	int ei ;
 	char *return_value;
 

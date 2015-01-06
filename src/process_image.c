@@ -81,12 +81,16 @@ static void refine_radius(Crystal *cr)
 	      refl != NULL;
 	      refl = next_refl(refl, iter) )
 	{
-		double i = get_intensity(refl);
 		double rlow, rhigh, p;
+		int val = 0;
+
+		if ( get_intensity(refl) > 9.0*get_esd_intensity(refl) ) {
+			val = 1;
+		}
 
 		get_partial(refl, &rlow, &rhigh, &p);
 
-		vals[(2*n)+0] = i;
+		vals[(2*n)+0] = val;
 		vals[(2*n)+1] = fabs((rhigh+rlow)/2.0);
 		n++;
 
@@ -95,16 +99,21 @@ static void refine_radius(Crystal *cr)
 	/* Sort in ascending order of absolute "deviation from Bragg" */
 	qsort(vals, n, sizeof(double)*2, cmpd2);
 
-	/* Add up all the intensity and calculate cumulative intensity as a
-	 * function of absolute "deviation from Bragg" */
+	/* Calculate cumulative number of very strong reflections as a function
+	 * of absolute deviation from Bragg */
 	for ( i=0; i<n-1; i++ ) {
 		ti += vals[2*i];
 		vals[2*i] = ti;
 	}
 
-	/* Find the cutoff where we get 67% of the intensity */
+	if ( ti < 10 ) {
+		ERROR("WARNING: Not enough strong reflections (%.0f) to estimate "
+		      "crystal parameters (trying anyway).\n", ti);
+	}
+
+	/* Find the cutoff where we get 90% of the strong spots */
 	for ( i=0; i<n-1; i++ ) {
-		if ( vals[2*i] > 0.67*ti ) break;
+		if ( vals[2*i] > 0.90*ti ) break;
 	}
 
 	crystal_set_profile_radius(cr, fabs(vals[2*i+1]));
@@ -170,12 +179,8 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		case PEAK_HDF5:
 		/* Get peaks from HDF5 */
 
-		if ( !single_panel_data_source(iargs->det, iargs->element) ) {
-			ERROR("Peaks from HDF5 file not supported with "
-			      "multiple panel data sources.\n");
-		}
-
-		if ( get_peaks(&image, hdfile, iargs->hdf5_peak_path) ) {
+		if ( get_peaks(&image, hdfile, iargs->hdf5_peak_path,
+		               iargs->cxi_hdf5_peaks, pargs->filename_p_e) ) {
 			ERROR("Failed to get peaks from HDF5 file.\n");
 		}
 		if ( !iargs->no_revalidate ) {
@@ -264,7 +269,7 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		n += crystal_get_num_implausible_reflections(image.crystals[i]);
 	}
 	if ( n > 0 ) {
-		STATUS("Warning: %i implausibly negative reflection%s in %s.\n",
+		STATUS("WARNING: %i implausibly negative reflection%s in %s.\n",
 		       n, n>1?"s":"", image.filename);
 	}
 

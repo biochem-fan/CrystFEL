@@ -150,7 +150,9 @@ crystfeldoc_DATA = doc/twin-calculator.pdf doc/examples/lcls-dec.geom \
                    doc/examples/lcls-xpp-estimate.geom \
                    doc/examples/simple.geom \
                    doc/examples/cspad-feb2011.geom \
-                   doc/examples/cell-example.cell
+                   doc/examples/pilatus.geom \
+                   doc/examples/cell-example.cell \
+		   doc/hitrate.html doc/hitrate.png
 
 EXTRA_DIST += $(crystfeldoc_DATA) doc/twin-calculator.odt \
               doc/reference/libcrystfel/xml/coding-standards.xml
