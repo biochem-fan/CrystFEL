@@ -29,7 +29,9 @@ int main(int argc, char **argv) {
 
 	struct image image;
 	int j;
+	int crystalid = 0;
 
+	printf("H K L RESO I SIGI BATCH\n");
 	while (!read_chunk(st, &image)) {
 		for (j = 0; j<image.n_crystals; j++ ) {
 			Crystal *cr = image.crystals[j];
@@ -41,14 +43,15 @@ int main(int argc, char **argv) {
 				signed int h, k, l, hu, ku, lu;
 				get_indices(refl, &h, &k, &l);
 				get_asymm(sym, h, k, l, &hu, &ku, &lu);	
-				printf("%i %i %i %.2f %.1f %.1f\n", hu, ku, lu,
+				printf("%d %d %d %.2f %.1f %.1f %d\n", hu, ku, lu,
 				       1E10 / 2.0 / resolution(crystal_get_cell(cr), hu, ku, lu),
-				       get_intensity(refl), get_esd_intensity(refl));
+				       get_intensity(refl), get_esd_intensity(refl), crystalid);
 			}			
 
 			reflist_free(crystal_get_reflections(cr));
 			cell_free(crystal_get_cell(cr));
 			crystal_free(cr);
+			crystalid++;
 		}
 	}
 
