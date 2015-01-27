@@ -280,6 +280,11 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	if ( geom_filename == NULL ) {
+		ERROR("You need to give me a geometry file!\n");
+		return -1;
+	}
+
 	if ( cscale == NULL ) cscale = strdup("colour");
 	if ( strcmp(cscale, "mono") == 0 ) {
 		colscale = SCALE_MONO;

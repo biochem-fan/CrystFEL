@@ -1664,11 +1664,10 @@ static gint open_stream(const char *filename, DisplayWindow *dw) {
 static gint displaywindow_open_response(GtkWidget *d, gint response,
                                         DisplayWindow *dw)
 {
-	int rval;
 
 	if ( response == GTK_RESPONSE_ACCEPT ) {
 		char *file = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(d));
-		rval = open_stream(file, dw);
+		open_stream(file, dw);
 		g_free(file);
 	}
 
@@ -2150,19 +2149,8 @@ static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh, struct ev
 		if ( !a ) return 0;
 	}
 
-	if (nh->widget != NULL) {
-		if (ev == NULL) {
-			fail = hdf5_read(nh->dw->hdfile, nh->dw->image, nh->name, 0);
-		} else {
-			fail = hdf5_read2(nh->dw->hdfile, nh->dw->image, ev, 0);
-		}
-	} else {
-		if (ev == NULL) {
-			fail = hdf5_read(nh->dw->hdfile, nh->dw->image, NULL, 0);
-		} else {
-			fail = hdf5_read2(nh->dw->hdfile, nh->dw->image, ev, 0);
-		}
-	}	      
+	fail = hdf5_read2(nh->dw->hdfile, nh->dw->image, ev, 0);
+
 	if ( fail ) {
 		ERROR("Couldn't load image");
 		return 1;
