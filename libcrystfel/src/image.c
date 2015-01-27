@@ -122,6 +122,8 @@ struct imagefeature *image_feature_closest(ImageFeatureList *flist,
 	int closest = 0;
 	struct panel *p1;
 
+	if (flist == NULL) return NULL;
+
 	p1 = find_panel(det, fs, ss);
 
 	for ( i=0; i<flist->n_features; i++ ) {
