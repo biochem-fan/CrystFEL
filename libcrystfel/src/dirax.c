@@ -658,7 +658,8 @@ IndexingPrivate *dirax_prepare(IndexingMethod *indm, UnitCell *cell,
 
 	/* Flags that DirAx knows about */
 	*indm &= INDEXING_METHOD_MASK | INDEXING_CHECK_CELL_COMBINATIONS
-	       | INDEXING_CHECK_CELL_AXES | INDEXING_CHECK_PEAKS;
+	       | INDEXING_CHECK_CELL_AXES | INDEXING_CHECK_PEAKS
+	       | INDEXING_MULTIPLE_LATTICE;
 
 	dp = malloc(sizeof(struct dirax_private));
 	if ( dp == NULL ) return NULL;

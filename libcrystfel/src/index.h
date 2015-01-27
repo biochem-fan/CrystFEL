@@ -103,6 +103,7 @@ typedef enum {
 	INDEXING_CHECK_PEAKS             = 1024,
 	INDEXING_USE_LATTICE_TYPE        = 2048,
 	INDEXING_USE_CELL_PARAMETERS     = 4096,
+	INDEXING_MULTIPLE_LATTICE        = 8192
 
 } IndexingMethod;
 

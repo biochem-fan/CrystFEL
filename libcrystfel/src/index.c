@@ -309,8 +309,9 @@ void index_pattern(struct image *image,
 	while ( indms[n] != INDEXING_NONE && stop == 0) {
 		while (try_indexer(image, indms[n], iprivs[n])) {
 			image->indexed_by = indms[n];
-			// stop = 1; break; // uncomment to disable multiple-lattice indexing
-			// TODO: Should be made switchable. Add INDEXING_MULTIPLE flag?
+			if (!(indms[n] & INDEXING_MULTIPLE_LATTICE)) {
+				stop = 1; break;
+			}
 
 			if (check_indexed(image, image->crystals[image->n_crystals - 1]) < 10) {
 			// Sometimes the returned orientation matrix is really bad and no spot is removed. 
@@ -361,6 +362,17 @@ static IndexingMethod set_comb(IndexingMethod a)
 	          | INDEXING_CHECK_CELL_COMBINATIONS;
 }
 
+static IndexingMethod set_multi(IndexingMethod a)
+{
+	return a | INDEXING_MULTIPLE_LATTICE;
+}
+
+
+/* Set the indexer flags for "combination mode" ("--cell-reduction=reduce") */
+static IndexingMethod set_single(IndexingMethod a)
+{
+	return a & ~INDEXING_MULTIPLE_LATTICE;
+}
 
 /* Set the indexer flags for "use no lattice type information" */
 static IndexingMethod set_nolattice(IndexingMethod a)
@@ -464,6 +476,12 @@ char *indexer_str(IndexingMethod indm)
 		strcat(str, "-nocell");
 	}
 
+	if ( indm & INDEXING_MULTIPLE_LATTICE ) {
+		strcat(str, "-multi");
+	} else {
+		strcat(str, "-single");
+	}
+
 	return str;
 }
 
@@ -526,6 +544,12 @@ IndexingMethod *build_indexer_list(const char *str)
 
 		} else if ( strcmp(methods[i], "nocell") == 0) {
 			list[nmeth] = set_nocellparams(list[nmeth]);
+
+		} else if ( strcmp(methods[i], "multi") == 0) {
+			list[nmeth] = set_multi(list[nmeth]);
+
+		} else if ( strcmp(methods[i], "single") == 0) {
+			list[nmeth] = set_single(list[nmeth]);
 
 		} else {
 			ERROR("Bad list of indexing methods: '%s'\n", str);

@@ -1120,7 +1120,7 @@ IndexingPrivate *reax_prepare(IndexingMethod *indm, UnitCell *cell,
 	p->cell = cell;
 
 	/* Flags that ReAx knows about */
-	*indm &= INDEXING_METHOD_MASK | INDEXING_CHECK_PEAKS;
+	*indm &= INDEXING_METHOD_MASK | INDEXING_CHECK_PEAKS | INDEXING_MULTIPLE_LATTICE;
 
 	/* Flags that ReAx requires */
 	*indm |= INDEXING_USE_LATTICE_TYPE;
