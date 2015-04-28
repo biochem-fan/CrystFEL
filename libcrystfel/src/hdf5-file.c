@@ -135,7 +135,7 @@ int hdfile_set_image(struct hdfile *f, const char *path,
 
 	f->dh = H5Dopen2(f->fh, path, H5P_DEFAULT);
 	if ( f->dh < 0 ) {
-		ERROR("Couldn't open dataset\n");
+		ERROR("Couldn't open dataset %s\n", path);
 		return -1;
 	}
 	f->data_open = 1;
@@ -938,7 +938,7 @@ int hdf5_read(struct hdfile *f, struct image *image, const char *element,
 	herr_t r;
 	float *buf;
 	int fail;
-
+	printf("element = %s\n", element);
 	if ( element == NULL ) {
 		fail = hdfile_set_first_image(f, "/");
 	} else {
@@ -1218,6 +1218,8 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 			ERROR("Error selecting memory dataspace for panel %s\n",
 			      p->name);
 			free(buf);
+			free(f_offset);
+			free(f_count);
 			return 1;
 		}
 
@@ -1227,6 +1229,8 @@ int hdf5_read2(struct hdfile *f, struct image *image, struct event *ev,
 			ERROR("Couldn't read data for panel %s\n",
 			      p->name);
 			free(buf);
+			free(f_offset);
+			free(f_count);
 			return 1;
 		}
 		H5Dclose(f->dh);
@@ -1435,7 +1439,7 @@ static int get_ev_based_f_value(struct hdfile *f, const char *name,
 		return 1;
 	}
 
-	dh = H5Dopen2(f->fh, name, H5P_DEFAULT);
+	dh = H5Dopen2(f->fh, subst_name, H5P_DEFAULT);
 	type = H5Dget_type(dh);
 	class = H5Tget_class(type);
 
@@ -1538,7 +1542,6 @@ static int get_ev_based_f_value(struct hdfile *f, const char *name,
 		}
 
 	}
-
 	free(subst_name);
 	*val = buf;
 
@@ -1714,17 +1717,22 @@ char *hdfile_get_string_value(struct hdfile *f, const char *name,
 	hid_t class;
 	int buf_i;
 	double buf_f;
-	char *tmp;
+	char *tmp = NULL, *subst_name = NULL;
 
-	dh = H5Dopen2(f->fh, name, H5P_DEFAULT);
+	if (ev != NULL && ev->path_length != 0 ) {
+		subst_name = partial_event_substitution(ev, name);
+	} else {
+		subst_name = strdup(name);
+	}
+
+	printf("get_string_value for %s\n", subst_name);
+	dh = H5Dopen2(f->fh, subst_name, H5P_DEFAULT);
 	if ( dh < 0 ) return NULL;
 	type = H5Dget_type(dh);
 	class = H5Tget_class(type);
 
 	if ( class == H5T_STRING ) {
-
 		herr_t r;
-		char *tmp;
 		hid_t sh;
 
 		size = H5Tget_size(type);
@@ -1733,46 +1741,37 @@ char *hdfile_get_string_value(struct hdfile *f, const char *name,
 		sh = H5Screate(H5S_SCALAR);
 
 		r = H5Dread(dh, type, sh, sh, H5P_DEFAULT, tmp);
-		if ( r < 0 ) goto fail;
-
-		/* Two possibilities:
-		 *   String is already zero-terminated
-		 *   String is not terminated.
-		 * Make sure things are done properly... */
-		tmp[size] = '\0';
-		chomp(tmp);
-
-		return tmp;
-
-	}
-
-	switch ( class ) {
-
-		case H5T_FLOAT :
-		if ( ev != NULL ) {
-			if ( get_ev_based_f_value(f, name, ev, &buf_f) ) goto fail;
+		if ( r < 0 ) {
+			free(tmp);
+			tmp = NULL;
 		} else {
-			if ( get_f_value(f, name, &buf_f) ) goto fail;
+			/* Two possibilities:
+			 *   String is already zero-terminated
+			 *   String is not terminated.
+			 * Make sure things are done properly... */
+			tmp[size] = '\0';
+			chomp(tmp);
 		}
-		tmp = malloc(256);
-		snprintf(tmp, 255, "%f", buf_f);
-		return tmp;
+	} else {
+		switch ( class ) {
 
-		case H5T_INTEGER :
-		if ( get_i_value(f, name, &buf_i) ) goto fail;
-		tmp = malloc(256);
-		snprintf(tmp, 255, "%d", buf_i);
-		return tmp;
+			case H5T_FLOAT :
+			if ( get_f_value(f, subst_name, &buf_f) ) break;
+			tmp = malloc(256);
+			snprintf(tmp, 255, "%f", buf_f);
+			break;
 
-		default :
-		goto fail;
-
+			case H5T_INTEGER :
+			if ( get_i_value(f, subst_name, &buf_i) ) break;
+			tmp = malloc(256);
+			snprintf(tmp, 255, "%d", buf_i);
+			break;
+		}
 	}
-
-fail:
 	H5Tclose(type);
 	H5Dclose(dh);
-	return NULL;
+	free(subst_name);
+	return tmp;
 }
 
 

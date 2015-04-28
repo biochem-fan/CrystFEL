@@ -2431,6 +2431,7 @@ static void update_statusbar(DisplayWindow *dw, GdkEventButton *event)
 	char statusbar_string[80] = {};
 	guint cc;
 
+	printf("evx = %f, evy = %f\n", event->x, event->y);
 	cc = gtk_statusbar_get_context_id(GTK_STATUSBAR(dw->statusbar),
 	                                  "calibmode");
 
@@ -2782,9 +2783,30 @@ static void calibmode_right(DisplayWindow *dw)
 static gint displaywindow_keypress(GtkWidget *widget, GdkEventKey *event,
                                    DisplayWindow *dw)
 {
-	int s;
+	int s, check;
 
 	if ( !dw->calib_mode ) {
+        	if (dw->multi_event == 0 || dw->stream != NULL) return -1;
+
+		if (event->keyval == GDK_space) {
+			int new_ev = dw->curr_event;
+			if (event->state & GDK_SHIFT_MASK) {
+				new_ev--;
+			} else {
+				new_ev++;
+			}
+			if (new_ev >= dw->ev_list->num_events || new_ev < 0) return -1;
+
+			float *old_buf = dw->image->data;
+			check = hdf5_read2(dw->hdfile, dw->image,
+		        	           dw->ev_list->events[new_ev], 0);
+			if (check == 0) {
+				dw->curr_event = new_ev;
+				displaywindow_update(dw);
+				free(old_buf);
+				// TODO: Must update radio buttons in the menu!
+			}
+	 	}
 		return 0;
 	}
 
@@ -2914,9 +2936,15 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	dw->image->lambda = 0.0;
 	dw->image->filename = filename;
 
-	// Surprisingly, hdfile_open succeeds with a stream file and ends up with SEGV!
-	// Thus, we must test stream first
-	if (open_stream(filename, dw) != 0) {
+	int len = strlen(filename);
+	if (len > 7 && strcmp(".stream", filename + len - 7) == 0) {
+		if (open_stream(filename, dw) != 0) {
+			ERROR("Couldn't open stream file: %s\n", filename);
+			free(dw->geom_filename);
+			free(dw);
+			return NULL;
+		}
+	} else { // HDF5
 		dw->hdfile = hdfile_open(filename);
 		if ( dw->hdfile == NULL ) {
 			ERROR("Couldn't open file: %s\n", filename);
@@ -2951,7 +2979,6 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 		}
 		// load image
 		if ( dw->image->det != NULL ) {
-
 			if ( dw->multi_event ) {
 				check = hdf5_read2(dw->hdfile, dw->image,
 				                   dw->ev_list->events[dw->curr_event], 0);
