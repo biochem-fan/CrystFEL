@@ -479,7 +479,7 @@ char *indexer_str(IndexingMethod indm)
 	if ( indm & INDEXING_MULTIPLE_LATTICE ) {
 		strcat(str, "-multi");
 	} else {
-		strcat(str, "-single");
+		//strcat(str, "-single"); // Don't write for backward compatibility
 	}
 
 	return str;
@@ -552,8 +552,8 @@ IndexingMethod *build_indexer_list(const char *str)
 			list[nmeth] = set_single(list[nmeth]);
 
 		} else {
-			ERROR("Bad list of indexing methods: '%s'\n", str);
-			return NULL;
+			ERROR("WARNING: unknown indexing methods: '%s'\n", str);
+			//return NULL;
 		}
 
 		free(methods[i]);
