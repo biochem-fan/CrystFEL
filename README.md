@@ -18,22 +18,14 @@ Added Features
 multievent branch
 -----------------
 
-Testing multi-event HDF support in the upstream. hdfsee branch was merged here.
+This is personal "master" branch where developments take place.
+"master" branch tracks the official repository.
+hdfsee and multiple-lattice branches have been merged here.
 
 * More updates in the stream viewer (hdfsee)
     * Resizable columns
     * Sortable rows
-    * Support multi-event HDF files (underway)
-
-multiple-lattice branch
------------------------
-
-Seems stable but please carefully examine if it improves the result.
-
-* Multiple lattice indexing by calling external indexer(s) many times.
-* Sending prior-cell information to MOSFLM.  
-  Prior-cell algorithm will be available in the next version of MOSFLM.
-* Hitrate calculator based on Poisson distribution in doc/hitrate.html
+    * Support multi-event HDF files
 
 experimental branch
 -------------------
@@ -49,10 +41,10 @@ Highly premature, experimental codes. Do **NOT** use this branch!
   dump unmerged (but indices converted to be in the ASU) intensities from 
   a stream file for statistical inspection.
 
-hdfsee branch
--------------
+hdfsee improvements 
+-------------------
 
-Should be stable enough for general use. Merged to multievent branch and deleted.
+Should be stable enough for general use. Merged to multievent branch.
 
 * Load stream file directly into hdfsee
 * Show spots and (multiple) lattices simultaneously
@@ -63,8 +55,19 @@ Should be stable enough for general use. Merged to multievent branch and deleted
   Since the original pixel doesn't have one-to-one correspondence in
   the output image, this is not perfectly accurate.
 
-scaling branch
---------------
+multiple-lattice indexing
+-------------------------
+
+This feature has been merged into the multievent branch.
+Seems stable but please carefully examine if it improves the result.
+
+* Multiple lattice indexing by calling external indexer(s) many times.
+* Sending prior-cell information to MOSFLM.  
+  Prior-cell algorithm will be available in the next version of MOSFLM.
+* Hitrate calculator based on Poisson distribution in doc/hitrate.html
+
+scaling
+-------
 
 All features have been merged to the official distirubtion. Thus this branch was deleted.
 
