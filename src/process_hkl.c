@@ -181,7 +181,6 @@ static double scale_intensities(RefList *reference, RefList *new,
 	return s;
 }
 
-
 static double cc_intensities(RefList *reference, RefList *new,
                              const SymOpList *sym)
 {
@@ -344,7 +343,6 @@ static int merge_crystal(RefList *model, struct image *image, Crystal *cr,
 		if ( *hist_vals != NULL ) {
 
 			if ( (h==hist_h) && (k==hist_k) && (l==hist_l) ) {
-
 				*hist_vals = check_hist_size(*hist_n,
 							     *hist_vals);
 

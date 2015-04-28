@@ -25,7 +25,7 @@ abline(v=mean(scale_cc$ScaleFactor) + (-5:5) * sd(scale_cc$ScaleFactor), col=2)
 plot(scale_cc$CC, type='h', ylab="CC", xlab="#Crystal")
 abline(h=mean(scale_cc$CC) + (-5:5) * sd(scale_cc$CC), col=2)
 
-hist(scale_cc$CC, breaks=100,
+hist(scale_cc$CC, breaks=100, 
      main="Distribution of Correlation Coefficient", xlab="CC")
 abline(v=mean(scale_cc$CC) + (-5:5) * sd(scale_cc$CC), col=2)
 par(mfrow=c(1,1))
