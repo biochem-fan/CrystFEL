@@ -3,11 +3,11 @@
  *
  * Generate partials for testing scaling
  *
- * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2011-2014 Thomas White <taw@physics.org>
+ *   2011-2015 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
@@ -241,6 +241,7 @@ static void show_help(const char *s)
 "     --profile-radius     Reciprocal space reflection profile radius in m^-1.\n"
 "                           Default 0.001e9 m^-1\n"
 "     --photon-energy      Photon energy in eV.  Default 9000.\n"
+"     --really-random      Be non-deterministic.\n"
 "\n"
 );
 }
@@ -411,6 +412,27 @@ static void finalise_job(void *vqargs, void *vwargs)
 	free_all_crystals(&wargs->image);
 	free(wargs->image.filename);
 	free(wargs);
+}
+
+
+static void fixup_geom(struct detector *det)
+{
+	int i;
+
+	for ( i=0; i<det->n_panels; i++ ) {
+		det->panels[i].clen += det->panels[i].coffset;
+	}
+}
+
+
+static int geom_contains_references(struct detector *det)
+{
+	int i;
+
+	for ( i=0; i<det->n_panels; i++ ) {
+		if ( det->panels[i].clen_from != NULL ) return 1;
+	}
+	return 0;
 }
 
 
@@ -707,6 +729,13 @@ int main(int argc, char *argv[])
 		ERROR("The value given on the command line "
 		      "(with --photon-energy) will be used instead.\n");
 	}
+	if ( geom_contains_references(det) ) {
+		ERROR("Geometry file contains a reference to an HDF5 location"
+		      " for the camera length.  Change it to a numerical value "
+		      " and try again.\n");
+		return 1;
+	}
+	fixup_geom(det);
 
 	if ( sym_str == NULL ) sym_str = strdup("1");
 	sym = get_pointgroup(sym_str);
@@ -728,6 +757,12 @@ int main(int argc, char *argv[])
 		if ( check_list_symmetry(full, sym) ) {
 			ERROR("The input reflection list does not appear to"
 			      " have symmetry %s\n", symmetry_name(sym));
+			if ( cell_get_lattice_type(cell) == L_MONOCLINIC ) {
+				ERROR("You may need to specify the unique axis "
+				      "in your point group.  The default is "
+				      "unique axis c.\n");
+				ERROR("See 'man crystfel' for more details.\n");
+			}
 			return 1;
 		}
 
@@ -756,6 +791,7 @@ int main(int argc, char *argv[])
 	free(output_file);
 
 	image.det = det;
+	image.beam = &beam;
 	image.width = det->max_fs + 1;
 	image.height = det->max_ss + 1;
 
@@ -770,6 +806,8 @@ int main(int argc, char *argv[])
 	image.num_peaks = 0;
 	image.num_saturated_peaks = 0;
 	image.spectrum_size = 0;
+	image.spectrum = NULL;
+	image.serial = 0;
 	image.event = NULL;
 
 	STATUS("Simulation parameters:\n");

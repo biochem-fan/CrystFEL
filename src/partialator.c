@@ -3,11 +3,11 @@
  *
  * Scaling and post refinement for coherent nanocrystallography
  *
- * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2010-2013 Thomas White <taw@physics.org>
+ *   2010-2015 Thomas White <taw@physics.org>
  *
  * This file is part of CrystFEL.
  *
@@ -55,6 +55,7 @@
 #include "post-refinement.h"
 #include "hrs-scaling.h"
 #include "scaling-report.h"
+#include "rejection.h"
 
 
 static void show_help(const char *s)
@@ -192,11 +193,29 @@ static void display_progress(int n_images, int n_crystals)
 
 static const char *str_flags(Crystal *cr)
 {
-	if ( crystal_get_user_flag(cr) ) {
-		return "N";
-	}
+	switch ( crystal_get_user_flag(cr) ) {
 
-	return "-";
+		case 0 :
+		return "OK";
+
+		case 1 :
+		return "bad scaling";
+
+		case 2 :
+		return "not enough reflections";
+
+		case 3 :
+		return "PR solve failed";
+
+		case 4 :
+		return "PR lost too many reflections";
+
+		case 5 :
+		return "Early rejection";
+
+		default :
+		return "Unknown flag";
+	}
 }
 
 
@@ -222,6 +241,101 @@ static RefList *apply_max_adu(RefList *list, double max_adu)
 	}
 	reflist_free(list);
 	return nlist;
+}
+
+
+static void skip_to_end(FILE *fh)
+{
+	int c;
+	do {
+		c = fgetc(fh);
+	} while ( (c != '\n') && (c != EOF) );
+}
+
+
+static int set_initial_params(Crystal *cr, FILE *fh)
+{
+	if ( fh != NULL ) {
+
+		int err;
+		int n;
+		float osf, B;
+
+		err = fscanf(fh, "%i %f %f", &n, &osf, &B);
+		if ( err != 3 ) {
+			ERROR("Failed to read parameters.\n");
+			return 1;
+		}
+
+		crystal_set_osf(cr, osf);
+		crystal_set_Bfac(cr, B*1e-20);
+
+		skip_to_end(fh);
+
+	} else {
+
+		crystal_set_osf(cr, 1.0);
+		crystal_set_Bfac(cr, 0.0);
+
+	}
+
+	return 0;
+}
+
+
+static void show_duds(Crystal **crystals, int n_crystals)
+{
+	int j;
+	int n_dud = 0;
+	int n_noscale = 0;
+	int n_noref = 0;
+	int n_solve = 0;
+	int n_lost = 0;
+	int n_early = 0;
+
+	for ( j=0; j<n_crystals; j++ ) {
+		int flag;
+		flag = crystal_get_user_flag(crystals[j]);
+		if ( flag != 0 ) n_dud++;
+		switch ( flag ) {
+
+			case 0:
+			break;
+
+			case 1:
+			n_noscale++;
+			break;
+
+			case 2:
+			n_noref++;
+			break;
+
+			case 3:
+			n_solve++;
+			break;
+
+			case 4:
+			n_lost++;
+			break;
+
+			case 5:
+			n_early++;
+			break;
+
+			default:
+			STATUS("Unknown flag %i\n", flag);
+			break;
+		}
+	}
+
+	if ( n_dud ) {
+		STATUS("%i bad crystals:\n", n_dud);
+		STATUS(" %i scaling failed.\n", n_noscale);
+		STATUS(" %i not enough reflections.\n", n_noref);
+		STATUS(" %i solve failed.\n", n_solve);
+		STATUS(" %i lost too many reflections.\n", n_lost);
+		STATUS(" %i early rejection.\n", n_early);
+	}
 }
 
 
@@ -251,6 +365,8 @@ int main(int argc, char *argv[])
 	struct srdata srdata;
 	int polarisation = 1;
 	double max_adu = +INFINITY;
+	char *sparams_fn = NULL;
+	FILE *sparams_fh;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -266,6 +382,7 @@ int main(int argc, char *argv[])
 
 		{"min-measurements",   1, NULL,                2},
 		{"max-adu",            1, NULL,                3},
+		{"start-params",       1, NULL,                4},
 
 		{"no-scale",           0, &noscale,            1},
 		{"no-polarisation",    0, &polarisation,       0},
@@ -340,6 +457,10 @@ int main(int argc, char *argv[])
 			}
 			break;
 
+			case 4 :
+			sparams_fn = strdup(optarg);
+			break;
+
 			case 0 :
 			break;
 
@@ -398,6 +519,20 @@ int main(int argc, char *argv[])
 	n_crystals = 0;
 	images = NULL;
 	crystals = NULL;
+	if ( sparams_fn != NULL ) {
+		char line[1024];
+		sparams_fh = fopen(sparams_fn, "r");
+		if ( sparams_fh == NULL ) {
+			ERROR("Failed to open '%s'\n", sparams_fn);
+			return 1;
+		}
+		fgets(line, 1024, sparams_fh);
+		STATUS("Reading initial scaling factors (G,B) from '%s'\n",
+		       sparams_fn);
+		free(sparams_fn);
+	} else {
+		sparams_fh = NULL;
+	}
 
 	do {
 
@@ -462,7 +597,13 @@ int main(int argc, char *argv[])
 
 			as = asymmetric_indices(cr_refl, sym);
 			crystal_set_reflections(cr, as);
+			crystal_set_user_flag(cr, 0);
 			reflist_free(cr_refl);
+
+			if ( set_initial_params(cr, sparams_fh) ) {
+				ERROR("Failed to set initial parameters\n");
+				return 1;
+			}
 
 			n_crystals++;
 
@@ -475,6 +616,7 @@ int main(int argc, char *argv[])
 	} while ( 1 );
 	display_progress(n_images, n_crystals);
 	fprintf(stderr, "\n");
+	if ( sparams_fh != NULL ) fclose(sparams_fh);
 
 	close_stream(st);
 
@@ -499,11 +641,21 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	/* Make a first pass at cutting out crap */
+//	STATUS("Checking patterns.\n");
+//	early_rejection(crystals, n_crystals);
+
 	/* Make initial estimates */
 	STATUS("Performing initial scaling.\n");
-	if ( noscale ) STATUS("Scale factors fixed at 1.\n");
-	full = scale_intensities(crystals, n_crystals,
-	                         nthreads, noscale, pmodel, min_measurements);
+	if ( noscale ) {
+		STATUS("Skipping scaling step (--no-scale).\n");
+		full = lsq_intensities(crystals, n_crystals, nthreads, pmodel);
+	} else {
+		full = scale_intensities(crystals, n_crystals, nthreads, pmodel,
+		                         min_measurements);
+	}
+
+	check_rejection(crystals, n_crystals);
 
 	srdata.crystals = crystals;
 	srdata.n = n_crystals;
@@ -515,14 +667,10 @@ int main(int argc, char *argv[])
 	                  infile, cmdline);
 	sr_iteration(sr, 0, &srdata);
 
+	show_duds(crystals, n_crystals);
+
 	/* Iterate */
 	for ( i=0; i<n_iter; i++ ) {
-		int n_noscale = 0;
-		int n_noref = 0;
-		int n_solve = 0;
-		int n_lost = 0;
-		int n_dud = 0;
-		int j;
 
 		STATUS("Post refinement cycle %i of %i\n", i+1, n_iter);
 
@@ -532,33 +680,21 @@ int main(int argc, char *argv[])
 		refine_all(crystals, n_crystals, full, nthreads, pmodel,
 		           &srdata);
 
-		for ( j=0; j<n_crystals; j++ ) {
-			int flag;
-			flag = crystal_get_user_flag(crystals[j]);
-			if ( flag != 0 ) n_dud++;
-			if ( flag == 1 ) {
-				n_noscale++;
-			} else if ( flag == 2 ) {
-				n_noref++;
-			} else if ( flag == 3 ) {
-				n_solve++;
-			} else if ( flag == 4 ) {
-				n_lost++;
-			}
-		}
+		show_duds(crystals, n_crystals);
+		check_rejection(crystals, n_crystals);
 
-		if ( n_dud ) {
-			STATUS("%i crystals could not be refined this cycle.\n",
-			       n_dud);
-			STATUS("%i scaling failed.\n", n_noscale);
-			STATUS("%i not enough reflections.\n", n_noref);
-			STATUS("%i solve failed.\n", n_solve);
-			STATUS("%i lost too many reflections.\n", n_lost);
-		}
 		/* Re-estimate all the full intensities */
 		reflist_free(full);
-		full = scale_intensities(crystals, n_crystals, nthreads,
-		                         noscale, pmodel, min_measurements);
+		if ( noscale ) {
+			STATUS("Skipping scaling step (--no-scale).\n");
+			full = lsq_intensities(crystals, n_crystals, nthreads,
+			                       pmodel);
+		} else {
+			full = scale_intensities(crystals, n_crystals, nthreads,
+			                         pmodel, min_measurements);
+		}
+
+		check_rejection(crystals, n_crystals);
 
 		srdata.full = full;
 
@@ -577,9 +713,11 @@ int main(int argc, char *argv[])
 	if ( fh == NULL ) {
 		ERROR("Couldn't open partialator.params!\n");
 	} else {
+		fprintf(fh, "  cr        OSF       relB         div flag\n");
 		for ( i=0; i<n_crystals; i++ ) {
-			fprintf(fh, "%4i %5.2f %8.5e %s\n", i,
+			fprintf(fh, "%4i %10.5f %10.2f %8.5e %s\n", i,
 			        crystal_get_osf(crystals[i]),
+				crystal_get_Bfac(crystals[i])*1e20,
 			        crystal_get_image(crystals[i])->div,
 			        str_flags(crystals[i]));
 		}

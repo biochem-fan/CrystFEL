@@ -3,11 +3,11 @@
  *
  * A class representing a single crystal
  *
- * Copyright © 2013 Deutsches Elektronen-Synchrotron DESY,
- *                  a research centre of the Helmholtz Association.
+ * Copyright © 2013-2015 Deutsches Elektronen-Synchrotron DESY,
+ *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2013 Thomas White <taw@physics.org>
+ *   2013-2015 Thomas White <taw@physics.org>
  *
  * This file is part of CrystFEL.
  *
@@ -56,6 +56,7 @@ struct _crystal
 	UnitCell                *cell;
 	double                  m;     /* Mosaicity in radians */
 	double                  osf;
+	double                  Bfac;
 	double                  profile_radius;
 	int                     pr_dud;
 	double                  resolution_limit;
@@ -68,6 +69,9 @@ struct _crystal
 
 	/* User flag, e.g. for "this is a bad crystal". */
 	int                     user_flag;
+
+	/* Text notes, which go in the stream */
+	char                    *notes;
 };
 
 
@@ -94,6 +98,8 @@ Crystal *crystal_new()
 	cryst->resolution_limit = 0.0;
 	cryst->n_saturated = 0;
 	cryst->n_implausible = 0;
+	cryst->notes = NULL;
+	cryst->user_flag = 0;
 
 	return cryst;
 }
@@ -188,6 +194,12 @@ double crystal_get_osf(Crystal *cryst)
 }
 
 
+double crystal_get_Bfac(Crystal *cryst)
+{
+	return cryst->Bfac;
+}
+
+
 int crystal_get_user_flag(Crystal *cryst)
 {
 	return cryst->user_flag;
@@ -197,6 +209,12 @@ int crystal_get_user_flag(Crystal *cryst)
 double crystal_get_mosaicity(Crystal *cryst)
 {
 	return cryst->m;
+}
+
+
+const char *crystal_get_notes(Crystal *cryst)
+{
+	return cryst->notes;
 }
 
 
@@ -251,6 +269,12 @@ void crystal_set_osf(Crystal *cryst, double osf)
 }
 
 
+void crystal_set_Bfac(Crystal *cryst, double Bfac)
+{
+	cryst->Bfac = Bfac;
+}
+
+
 void crystal_set_user_flag(Crystal *cryst, int user_flag)
 {
 	cryst->user_flag = user_flag;
@@ -260,4 +284,36 @@ void crystal_set_user_flag(Crystal *cryst, int user_flag)
 void crystal_set_mosaicity(Crystal *cryst, double m)
 {
 	cryst->m = m;
+}
+
+
+void crystal_set_notes(Crystal *cryst, const char *notes)
+{
+	free(cryst->notes);  /* free(NULL) is OK */
+	cryst->notes = strdup(notes);
+}
+
+
+void crystal_add_notes(Crystal *cryst, const char *notes_add)
+{
+	size_t len;
+	char *nnotes;
+
+	if ( cryst->notes == NULL ) {
+		crystal_set_notes(cryst, notes_add);
+		return;
+	}
+
+	len = strlen(notes_add) + strlen(cryst->notes) + 2;
+	nnotes = malloc(len);
+	if ( nnotes == NULL ) {
+		ERROR("Failed to add notes to crystal.\n");
+		return;
+	}
+
+	strcpy(nnotes, cryst->notes);
+	strcat(nnotes, "\n");
+	strcat(nnotes, notes_add);
+	free(cryst->notes);
+	cryst->notes = nnotes;
 }

@@ -1,7 +1,8 @@
 .\"
 .\" compare_hkl man page
 .\"
-.\" Copyright © 2012-2014 Thomas White <taw@physics.org>
+.\" Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
+.\"                       a research centre of the Helmholtz Association.
 .\"
 .\" Part of CrystFEL - crystallography with a FEL
 .\"
@@ -11,12 +12,12 @@
 compare_hkl \- compare reflection data
 .SH SYNOPSIS
 .PP
-\fBcompare_hkl\fR \fR [\fIoptions\fR] \fB...\fR \fIfile1.hkl\fR \fIfile2.hkl\fR
+\fBcompare_hkl\fR [\fIoptions\fR] \fB... \fIfile1.hkl \fIfile2.hkl\fR -p \fIcell.pdb\fR
 .PP
 \fBcompare_hkl --help\fR
 
 .SH DESCRIPTION
-compare_hkl compares two sets of reflection data and calculates figures of merit such as R-factors.  Reflections will be considered equivalent according to your choice of point group.
+compare_hkl compares two sets of reflection data and calculates figures of merit such as R-factors.  Reflections will be considered equivalent according to your choice of point group. You need to provide a unit cell, as a PDB file or a CrystFEL unit cell file.
 
 .SH OPTIONS
 .PD 0
@@ -69,6 +70,9 @@ Note that this figure of merit compares measurements within one data set, so it 
 .IP \fBRano/Rsplit\fR
 .PD
 The ratio of Rano to Rsplit, as defined above.
+.IP "\fBd1sig\fR and \fBd2sig\fR"
+.PD
+The fraction of differences between intensities which are within one times (for \fBd1sig\fR) and two times (for \fBd2sig\fR) the mean of the corresponding sigma(I) values.
 .PP
 I1 and I2 are the intensities of the same reflection in both reflection lists.  The scale factor, k, is given by sum(I1*i2) / sum(I2^2), unless you use \fB-u\fR.
 .RE
@@ -135,7 +139,7 @@ This page was written by Thomas White.
 Report bugs to <taw@physics.org>, or visit <http://www.desy.de/~twhite/crystfel>.
 
 .SH COPYRIGHT AND DISCLAIMER
-Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY, a research centre of the Helmholtz Association.
+Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY, a research centre of the Helmholtz Association.
 .P
 compare_hkl, and this manual, are part of CrystFEL.
 .P

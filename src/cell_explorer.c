@@ -418,7 +418,7 @@ static gboolean draw_sig(GtkWidget *da, GdkEventExpose *event, HistoBox *b)
 	cairo_text_extents_t ext;
 	char label[256];
 
-	cairo_select_font_face(cr, "Serif", CAIRO_FONT_SLANT_ITALIC,
+	cairo_select_font_face(cr, "Liberation Serif", CAIRO_FONT_SLANT_ITALIC,
 	                       CAIRO_FONT_WEIGHT_BOLD);
 	cairo_set_font_size(cr, height/10.0);
 
@@ -695,7 +695,8 @@ static void scan_minmax(CellWindow *w)
 				fprintf(stderr, "Too many indexing methods\n");
 			} else {
 				IndexingMethod m = w->indms[i];
-				w->unique_indms[w->n_unique_indms++] = m;
+				w->unique_indms[w->n_unique_indms] = m;
+				w->active_indms[w->n_unique_indms++] = 1;
 			}
 		}
 

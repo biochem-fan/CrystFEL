@@ -144,7 +144,7 @@ static void draw_panel_rectangle(cairo_t *cr, cairo_matrix_t *basic_m,
 }
 
 
-int render_adsc_uint16(DisplayWindow *dw, const char *filename)
+static int render_adsc_uint16(DisplayWindow *dw, const char *filename)
 {
 	int x, y, fs, ss;
 	double dfs, dss;
@@ -312,10 +312,27 @@ static void show_simple_ring(cairo_t *cr, DisplayWindow *dw,
 	cairo_stroke(cr);
 }
 
+static struct rigid_group *find_corresponding_rigid_group(DisplayWindow *dw,
+                                                          struct panel *p) {
+
+	int gi;
+
+	for (gi=0; gi<dw->rg_coll->n_rigid_groups; gi++) {
+		if (panel_is_in_rigid_group(dw->rg_coll->rigid_groups[gi],
+		    p)) {
+			return dw->rg_coll->rigid_groups[gi];
+		}
+	}
+
+	return NULL;
+}
+
 
 static void maybe_draw_focus(DisplayWindow *dw, cairo_t *cr, int i,
                              cairo_matrix_t *basic_m)
 {
+	struct rigid_group *rg = NULL;
+
 	switch ( dw->calib_mode ) {
 
 		case CALIBMODE_NONE:
@@ -329,8 +346,9 @@ static void maybe_draw_focus(DisplayWindow *dw, cairo_t *cr, int i,
 		break;
 
 		case CALIBMODE_GROUPS:
-		if ( dw->image->det->panels[i].rigid_group == dw->calib_mode_curr_rg )
-		{
+		rg = find_corresponding_rigid_group(dw,
+		                                    &dw->image->det->panels[i]);
+		if (rg == dw->calib_mode_curr_rg) {
 			draw_calib_focus_rectangle(cr, basic_m, dw, i);
 			cairo_stroke(cr);
 		}
@@ -835,9 +853,9 @@ static gint displaywindow_set_boostint(GtkWidget *widget, DisplayWindow *dw)
 		return 0;
 	}
 
-    if ( dw->hdfile == NULL ) {
-        return 0;
-    }
+	if ( dw->hdfile == NULL ) {
+	    return 0;
+	}
 
 	bd = malloc(sizeof(BoostIntDialog));
 	if ( bd == NULL ) return 0;
@@ -881,6 +899,207 @@ static gint displaywindow_set_boostint(GtkWidget *widget, DisplayWindow *dw)
 	gtk_window_set_resizable(GTK_WINDOW(bd->window), FALSE);
 	gtk_widget_show_all(bd->window);
 	gtk_widget_grab_focus(GTK_WIDGET(bd->entry));
+
+	return 0;
+}
+
+
+static void do_filters(DisplayWindow *dw)
+{
+	if ( dw->median_filter > 0 ) {
+		filter_median(dw->image, dw->median_filter);
+	}
+
+	if ( dw->noisefilter ) {
+		filter_noise(dw->image);
+	}
+}
+
+
+static gint displaywindow_newevent(DisplayWindow *dw, int new_event)
+{
+	int fail;
+	int i;
+	char title[1024];
+	char *bn;
+
+	if ( dw->not_ready_yet ) return 0;
+
+	float *old_data = dw->image->data;
+	uint16_t *old_flags = dw->image->flags;
+	float **old_dp = dw->image->dp;
+	int **old_bad = dw->image->bad;
+
+	fail = hdf5_read2(dw->hdfile, dw->image,
+                          dw->ev_list->events[new_event], 0);
+	if ( fail ) {
+		ERROR("Couldn't load image");
+		dw->image->data = old_data;
+		dw->image->flags = old_flags;
+		dw->image->dp = old_dp;
+		dw->image->bad = old_bad;
+		return 1;
+	}
+
+	dw->curr_event = new_event;
+
+	do_filters(dw);
+	displaywindow_update(dw);
+
+	bn = safe_basename(dw->image->filename);
+	sprintf(title, "%s - event: %s - hdfsee", bn,
+	        get_event_string(dw->ev_list->events[dw->curr_event]));
+	gtk_window_set_title(GTK_WINDOW(dw->window), title);
+	free(bn);
+
+	for (i = 0; i < dw->image->det->n_panels; i++) {
+		free(old_dp[i]);
+		free(old_bad[i]);
+	}
+	free(old_data);
+	free(old_flags);
+	free(old_dp);
+	free(old_bad);
+	return 0;
+}
+
+
+static gint displaywindow_randomevent(GtkWidget *widget, DisplayWindow *dw)
+{
+	int rand_event;
+
+	if ( dw->not_ready_yet ) return 0;
+
+	rand_event = gsl_rng_uniform_int(&dw->rng, dw->ev_list->num_events);
+
+	return displaywindow_newevent(dw, rand_event);
+}
+
+
+static gint displaywindow_set_newevent_response(GtkWidget *widget,
+						gint response,
+						DisplayWindow *dw)
+{
+	int ei;
+	int matched_event;
+	int done = 1;
+
+	if ( response == GTK_RESPONSE_OK ) {
+
+		const char *sevent;
+
+
+
+		sevent = gtk_entry_get_text(
+                                         GTK_ENTRY(dw->event_dialog->entry));
+
+		matched_event = -1;
+
+		for ( ei=0; ei<dw->ev_list->num_events; ei++ ) {
+
+			char *ei_ev_string;
+
+			ei_ev_string = get_event_string(dw->ev_list->events[ei]);
+			if ( strcmp(ei_ev_string, sevent) == 0 ) {
+				matched_event = ei;
+				break;
+			}
+		}
+
+		if ( matched_event == -1 ) {
+			displaywindow_error(dw, "Cannot find event.\n");
+			done = 0;
+		} else {
+			displaywindow_newevent(dw, matched_event);
+			displaywindow_update(dw);
+		}
+	}
+
+	if ( done ) {
+		gtk_widget_destroy(dw->event_dialog->window);
+	}
+
+	return 0;
+}
+
+
+static gint displaywindow_set_newevent_destroy(GtkWidget *widget,
+					       DisplayWindow *dw)
+{
+	free(dw->event_dialog);
+	dw->event_dialog = NULL;
+	return 0;
+}
+
+
+static gint displaywindow_set_newevent_response_ac(GtkWidget *widget,
+						   DisplayWindow *dw)
+{
+	return displaywindow_set_newevent_response(widget, GTK_RESPONSE_OK, dw);
+}
+
+
+/* Create a window to ask the user for a new intensity boost factor */
+static gint displaywindow_set_newevent(GtkWidget *widget, DisplayWindow *dw)
+{
+	EventDialog *ed;
+	GtkWidget *vbox;
+	GtkWidget *hbox;
+	GtkWidget *table;
+	GtkWidget *label;
+	char tmp[1024];
+
+	if ( dw->event_dialog != NULL ) {
+		return 0;
+	}
+
+	if ( dw->hdfile == NULL ) {
+	    return 0;
+	}
+
+	ed = malloc(sizeof(EventDialog));
+	if ( ed == NULL ) return 0;
+	dw->event_dialog = ed;
+
+	ed->window = gtk_dialog_new_with_buttons("Go to event",
+					GTK_WINDOW(dw->window),
+					GTK_DIALOG_DESTROY_WITH_PARENT,
+					GTK_STOCK_CANCEL, GTK_RESPONSE_CLOSE,
+					GTK_STOCK_OK, GTK_RESPONSE_OK, NULL);
+
+	vbox = gtk_vbox_new(FALSE, 0);
+	hbox = gtk_hbox_new(TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(GTK_DIALOG(ed->window)->vbox),
+			   GTK_WIDGET(hbox), FALSE, FALSE, 7);
+	gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(vbox), FALSE, FALSE, 5);
+
+	table = gtk_table_new(3, 2, FALSE);
+	gtk_table_set_row_spacings(GTK_TABLE(table), 5);
+	gtk_table_set_col_spacings(GTK_TABLE(table), 5);
+	gtk_box_pack_start(GTK_BOX(vbox), GTK_WIDGET(table), FALSE, FALSE, 0);
+
+	label = gtk_label_new("Event ID:");
+	gtk_misc_set_alignment(GTK_MISC(label), 1, 0.5);
+	gtk_table_attach_defaults(GTK_TABLE(table), GTK_WIDGET(label),
+				  1, 2, 3, 4);
+
+	ed->entry = gtk_entry_new();
+	snprintf(tmp, 1023, "%s",
+	         get_event_string(dw->ev_list->events[dw->curr_event]));
+	gtk_entry_set_text(GTK_ENTRY(ed->entry), tmp);
+	gtk_table_attach_defaults(GTK_TABLE(table), GTK_WIDGET(ed->entry),
+				  2, 3, 3, 4);
+
+	g_signal_connect(G_OBJECT(ed->entry), "activate",
+			 G_CALLBACK(displaywindow_set_newevent_response_ac),
+			 dw);
+	g_signal_connect(G_OBJECT(ed->window), "response",
+			 G_CALLBACK(displaywindow_set_newevent_response), dw);
+	g_signal_connect(G_OBJECT(ed->window), "destroy",
+			 G_CALLBACK(displaywindow_set_newevent_destroy), dw);
+	gtk_window_set_resizable(GTK_WINDOW(ed->window), FALSE);
+	gtk_widget_show_all(ed->window);
+	gtk_widget_grab_focus(GTK_WIDGET(ed->entry));
 
 	return 0;
 }
@@ -1096,8 +1315,8 @@ static void load_features_from_file(struct image *image, const char *filename)
 				      "(no geometry file given?)\n", pn);
 			} else {
 
-				/* Convert coordinates to match rearranged panels in
-				 * memory */
+				/* Convert coordinates to match rearranged panels
+				 * in memory */
 				fs = fs - p->orig_min_fs + p->min_fs;
 				ss = ss - p->orig_min_ss + p->min_ss;
 
@@ -1106,6 +1325,23 @@ static void load_features_from_file(struct image *image, const char *filename)
 			image_add_feature(image->features, fs, ss, image, 1.0,
 			                  "peak");
 		} else if ( r == 4 ) {
+
+			p = find_orig_panel(image->det, fs, ss);
+
+			if ( p == NULL ) {
+				ERROR("Unable to find panel "
+				      "(no geometry file given?)\n");
+			} else {
+
+				/* Convert coordinates to match rearranged
+				 * panels in memory */
+				fs = fs - p->orig_min_fs + p->min_fs;
+				ss = ss - p->orig_min_ss + p->min_ss;
+			}
+			image_add_feature(image->features, fs, ss, image, 1.0,
+			                  "peak");
+
+		} else if ( r == 2 ) {
 
 			p = find_orig_panel(image->det, fs, ss);
 
@@ -1173,13 +1409,15 @@ static gint displaywindow_about(GtkWidget *widget, DisplayWindow *dw)
 	gtk_about_dialog_set_name(GTK_ABOUT_DIALOG(window), "hdfsee");
 	gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(window), PACKAGE_VERSION);
 	gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(window),
-		"(c) 2012-2013 Thomas White <taw@physics.org> and others");
+	         "© 2012-2015 Deutsches Elektronen-Synchrotron DESY,"
+		 " a research centre of the Helmholtz Association.");
 	gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(window),
-		"Quick viewer for HDF files");
+	         "Quick viewer for HDF files");
 	gtk_about_dialog_set_license(GTK_ABOUT_DIALOG(window),
-		"(c) 2012-2013 Thomas White <taw@physics.org>\n");
+	         "© 2012-2015 Deutsches Elektronen-Synchrotron DESY,"
+		 " a research centre of the Helmholtz Association.");
 	gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(window),
-		"http://www.desy.de/~twhite/crystfel");
+	         "http://www.desy.de/~twhite/crystfel");
 	gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(window), authors);
 
 	g_signal_connect(window, "response", G_CALLBACK(gtk_widget_destroy),
@@ -1191,7 +1429,7 @@ static gint displaywindow_about(GtkWidget *widget, DisplayWindow *dw)
 }
 
 
-static int save_geometry_file(DisplayWindow *dw)
+static int save_geometry_file(GtkWidget *widget, DisplayWindow *dw)
 {
 	GtkWidget *d;
 	gchar *output_filename;
@@ -1206,11 +1444,14 @@ static int save_geometry_file(DisplayWindow *dw)
 
 	gtk_dialog_run(GTK_DIALOG(d));
 	output_filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER (d));
-	w = write_detector_geometry(dw->geom_filename, output_filename,
-	                            dw->image->det);
-	if ( w != 0 ) {
-		ERROR("Error saving geometry!\n");
+	w = write_detector_geometry_2(dw->geom_filename, output_filename,
+	                              dw->image->det, "Manually optimized with "
+	                              "hdfsee", 0);
+	if ( w != 0 && w!=2 ) {
+		displaywindow_error(dw,
+		       "Unable to save the detector geometry.");
 	}
+
 	gtk_widget_destroy(d);
 	g_free(output_filename);
 	return w;
@@ -1237,6 +1478,54 @@ static gint displaywindow_peak_overlay(GtkWidget *widget, DisplayWindow *dw)
 }
 
 
+static void set_calibration_menu_sensitivity(DisplayWindow *dw, int val) {
+
+	GtkAction * a;
+
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/calibration");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/calibration/calibrationprevious");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/calibration/calibrationnext");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/calibration/switchcalibmode");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/calibration/focus");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/calibration/savegeometry");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+}
+
+
+static void set_events_menu_sensitivity(DisplayWindow *dw, int val) {
+
+	GtkAction * a;
+
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/events");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/events/eventprevious");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/events/eventnext");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/events/gotoevent");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+	a = gtk_ui_manager_get_action(dw->ui,
+	                  "/ui/displaywindow/events/randomevent");
+	gtk_action_set_sensitive(GTK_ACTION(a), val);
+
+}
+
+
 static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 {
 	GtkWidget *w, *vbox;
@@ -1244,9 +1533,29 @@ static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 
 	w =  gtk_ui_manager_get_widget(dw->ui,
 	                               "/ui/displaywindow/tools/calibmode");
-	if ( dw->image->det == dw->simple_geom ) {
+	if ( dw->simple ) {
 		gtk_check_menu_item_set_state(GTK_CHECK_MENU_ITEM(w), 0);
 		return 0;
+	}
+
+	if (dw->rg_coll_name == NULL) {
+		dw->rg_coll = dw->image->det->rigid_group_collections[0];
+		if (dw->rg_coll == NULL) {
+			ERROR("Cannot find asuitable rigid group collection.\n");
+			gtk_check_menu_item_set_state(GTK_CHECK_MENU_ITEM(w),
+	                                              0);
+			return 0;
+		}
+	} else {
+		dw->rg_coll = find_rigid_group_collection_by_name(dw->image->det,
+		              dw->rg_coll_name);
+		if (dw->rg_coll == NULL) {
+			ERROR("Cannot find rigid group collection: %s\n",
+			      dw->rg_coll_name);
+			gtk_check_menu_item_set_state(GTK_CHECK_MENU_ITEM(w),
+			                              0);
+			return 0;
+		}
 	}
 
 	/* Get new value */
@@ -1260,9 +1569,11 @@ static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 		if ( (dw->calib_mode_curr_rg == NULL)
 		  && (dw->calib_mode_curr_p == NULL) )
 		{
-			dw->calib_mode_curr_rg = dw->image->det->rigid_groups[0];
+			dw->calib_mode_curr_rg = dw->rg_coll->rigid_groups[0];
 			dw->calib_mode_curr_p = dw->calib_mode_curr_rg->panels[0];
 		}
+
+		set_calibration_menu_sensitivity(dw, TRUE);
 
 		dw->calib_mode = CALIBMODE_PANELS;
 
@@ -1278,6 +1589,8 @@ static gint displaywindow_set_calibmode(GtkWidget *d, DisplayWindow *dw)
 		displaywindow_update(dw);
 
 	} else {
+
+		set_calibration_menu_sensitivity(dw, FALSE);
 
 		dw->calib_mode = CALIBMODE_NONE;
 		gtk_widget_destroy(dw->statusbar);
@@ -1655,6 +1968,207 @@ static gint displaywindow_setscale(GtkWidget *widget, GtkRadioAction *action,
 	return 0;
 }
 
+static int curr_rg_pointer_index(DisplayWindow *dw)
+{
+	int r;
+
+	for ( r=0; r<dw->rg_coll->n_rigid_groups; ++r) {
+		if ( dw->rg_coll->rigid_groups[r] == dw->calib_mode_curr_rg ) {
+			return r;
+		}
+	}
+
+	/* Never reached (we hope) */
+	return 999;
+}
+
+static int curr_p_pointer_index(DisplayWindow *dw)
+{
+	int p;
+
+	for ( p=0; p<dw->image->det->n_panels; ++p) {
+		if ( &dw->image->det->panels[p] == dw->calib_mode_curr_p ) {
+			return p;
+		}
+	}
+
+	/* Never reached (we hope) */
+	return 999;
+}
+
+
+static void select_next_group(DisplayWindow *dw, int num_rg)
+{
+	if ( dw->calib_mode_curr_rg == dw->rg_coll->rigid_groups[num_rg-1] ) {
+		dw->calib_mode_curr_rg = dw->rg_coll->rigid_groups[0];
+	} else {
+		dw->calib_mode_curr_rg =
+		  dw->rg_coll->rigid_groups[curr_rg_pointer_index(dw)+1];
+	}
+}
+
+
+static void select_prev_group(DisplayWindow *dw, int num_rg)
+{
+	if ( dw->calib_mode_curr_rg == dw->rg_coll->rigid_groups[0] ) {
+		dw->calib_mode_curr_rg = dw->rg_coll->rigid_groups[num_rg-1];
+	} else {
+		dw->calib_mode_curr_rg =
+		    dw->rg_coll->rigid_groups[curr_rg_pointer_index(dw)-1];
+	}
+}
+
+
+static void select_next_panel(DisplayWindow *dw, int num_p)
+{
+	if ( dw->calib_mode_curr_p == &dw->image->det->panels[num_p-1] ) {
+		dw->calib_mode_curr_p = &dw->image->det->panels[0];
+	} else {
+		dw->calib_mode_curr_p =
+		  &dw->image->det->panels[curr_p_pointer_index(dw)+1];
+	}
+}
+
+
+static void select_prev_panel(DisplayWindow *dw, int num_p)
+{
+	if ( dw->calib_mode_curr_p == &dw->image->det->panels[0] ) {
+		dw->calib_mode_curr_p = &dw->image->det->panels[num_p-1];
+	} else {
+		dw->calib_mode_curr_p =
+		  &dw->image->det->panels[curr_p_pointer_index(dw)-1];
+	}
+}
+
+
+static void toggle_calibmode_groupmode(GtkWidget *widget, DisplayWindow *dw)
+{
+	struct rigid_group *rg;
+	struct detector *det = dw->image->det;
+
+	switch ( dw->calib_mode ) {
+
+		case CALIBMODE_NONE:
+		break;
+
+		case CALIBMODE_PANELS:
+		if ( det->n_rigid_groups != det->n_panels ) {
+			/* Only change if there are any rigid groups defined */
+			dw->calib_mode = CALIBMODE_GROUPS;
+			rg = find_corresponding_rigid_group(dw,
+			     dw->calib_mode_curr_p);
+			if ( rg == NULL) {
+				dw->calib_mode = CALIBMODE_ALL;
+			} else {
+				dw->calib_mode_curr_rg = rg;
+			}
+
+		} else {
+			/* ...otherwise skip to ALL mode */
+			dw->calib_mode = CALIBMODE_ALL;
+		}
+		break;
+
+		case CALIBMODE_GROUPS:
+		dw->calib_mode = CALIBMODE_ALL;
+		break;
+
+		case CALIBMODE_ALL:
+		dw->calib_mode = CALIBMODE_PANELS;
+		dw->calib_mode_curr_p = dw->calib_mode_curr_rg->panels[0];
+		break;
+
+	}
+	redraw_window(dw);
+}
+
+
+static void toggle_calibmode_focus(GtkWidget *widget, DisplayWindow *dw)
+{
+	dw->calib_mode_show_focus = 1 - dw->calib_mode_show_focus;
+	redraw_window(dw);
+}
+
+
+static void calibmode_next(GtkWidget *widget, DisplayWindow *dw)
+{
+	int n;
+
+	switch ( dw->calib_mode ) {
+
+		case CALIBMODE_NONE:
+		break;
+
+		case CALIBMODE_PANELS:
+		n = dw->image->det->n_panels;
+		select_next_panel(dw, n);
+		break;
+
+		case CALIBMODE_GROUPS:
+		n = dw->image->det->n_rigid_groups;
+		select_next_group(dw, n);
+		break;
+
+		case CALIBMODE_ALL:
+		break;
+
+	}
+	redraw_window(dw);
+}
+
+
+static void calibmode_prev(GtkWidget *widget, DisplayWindow *dw)
+{
+	int n;
+
+	switch ( dw->calib_mode ) {
+
+		case CALIBMODE_NONE:
+		break;
+
+		case CALIBMODE_PANELS:
+		n = dw->image->det->n_panels;
+		select_prev_panel(dw, n);
+		break;
+
+		case CALIBMODE_GROUPS:
+		n = dw->image->det->n_rigid_groups;
+		select_prev_group(dw, n);
+		break;
+
+		case CALIBMODE_ALL:
+		break;
+
+	}
+	redraw_window(dw);
+}
+
+
+static void event_next(GtkWidget *widget, DisplayWindow *dw)
+{
+	int new_event;
+
+	if ( dw->curr_event == dw->ev_list->num_events-1 ) {
+		new_event = 0;
+	} else {
+		new_event = dw->curr_event+1;
+	}
+	displaywindow_newevent(dw, new_event);
+}
+
+
+static void event_prev(GtkWidget *widget, DisplayWindow *dw)
+{
+	int new_event;
+
+	if ( dw->curr_event == 0 ) {
+		new_event = dw->ev_list->num_events-1;
+	} else {
+		new_event = dw->curr_event-1;
+	}
+	displaywindow_newevent(dw, new_event);
+}
+
 
 static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
                                      int colscale)
@@ -1683,7 +2197,27 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 		{ "PeaksAction", NULL, "Load Feature List...", NULL, NULL,
 			G_CALLBACK(displaywindow_peak_overlay) },
 
-		{ "EventsAction", NULL, "_Events", NULL, NULL, NULL },
+		{ "CalibrationAction", NULL, "_Calibration", NULL, NULL, NULL },
+		{ "CalibPreviousAction", NULL, "Previous Item", "minus", NULL,
+			G_CALLBACK(calibmode_prev) },
+		{ "CalibNextAction", NULL, "Next Item", "plus", NULL,
+			G_CALLBACK(calibmode_next) },
+		{ "SwitchCalibModeAction", NULL, "Toggle Panel/Group/All", "g",
+			NULL, G_CALLBACK(toggle_calibmode_groupmode) },
+		{ "ToggleFocusAction", NULL, "Toggle Focus Rectangle", "i",
+			NULL, G_CALLBACK(toggle_calibmode_focus) },
+		{ "SaveGeometryAction", NULL, "Save Geometry", "s", NULL,
+			G_CALLBACK(save_geometry_file) },
+
+		{ "EventsAction", NULL, "_Event", NULL, NULL, NULL },
+		{ "EventPreviousAction", NULL, "Previous", "p", NULL,
+			G_CALLBACK(event_prev) },
+		{ "EventNextAction", NULL, "Next", "n", NULL,
+			G_CALLBACK(event_next) },
+		{ "GotoEventAction", NULL, "Go To Event", "e", NULL,
+			G_CALLBACK(displaywindow_set_newevent) },
+		{ "RandomEventAction", NULL, "Go To Random Event", "r", NULL,
+			G_CALLBACK(displaywindow_randomevent) },
 
 		{ "HelpAction", NULL, "_Help", NULL, NULL, NULL },
 		{ "AboutAction", GTK_STOCK_ABOUT, "_About hdfsee...",
@@ -1740,17 +2274,6 @@ static void displaywindow_addmenubar(DisplayWindow *dw, GtkWidget *vbox,
 }
 
 
-static void do_filters(DisplayWindow *dw)
-{
-	if ( dw->median_filter > 0 ) {
-		filter_median(dw->image, dw->median_filter);
-	}
-
-	if ( dw->noisefilter ) {
-		filter_noise(dw->image);
-	}
-}
-
 struct newhdf {
 	DisplayWindow *dw;
 	GtkWidget *widget;
@@ -1767,14 +2290,15 @@ static gint displaywindow_newhdf(GtkMenuItem *item, struct newhdf *nh)
 	a = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(nh->widget));
 	if ( !a ) return 0;
 
+	/* hdf5_read() will create a new simple geom, so get rid of the old
+	 * one */
+	free_detector_geometry(nh->dw->image->det);
+	nh->dw->image->det = NULL;
 	fail = hdf5_read(nh->dw->hdfile, nh->dw->image, nh->name, 0);
 	if ( fail ) {
 		ERROR("Couldn't load image");
 		return 1;
 	}
-
-	nh->dw->simple_geom = simple_geometry(nh->dw->image);
-	nh->dw->image->det = nh->dw->simple_geom;
 
 	do_filters(nh->dw);
 	displaywindow_update(nh->dw);
@@ -1847,7 +2371,8 @@ static GtkWidget *displaywindow_addhdfgroup(struct hdfile *hdfile,
 			item = gtk_menu_item_new_with_label(names[i]);
 
 			if ( hdfile_is_scalar(hdfile, names[i], 0) ) {
-				tmp = hdfile_get_string_value(hdfile, names[i], NULL);
+				tmp = hdfile_get_string_value(hdfile, names[i],
+				      NULL);
 			} else {
 				tmp = NULL;
 			}
@@ -1916,102 +2441,6 @@ static int displaywindow_update_menus(DisplayWindow *dw, const char *selectme)
 
 	return 0;
 }
-
-
-static gint displaywindow_newevent(GtkMenuItem *item, struct newev *ne)
-{
-	gboolean a;
-	int fail;
-	int i;
-
-	if ( ne->dw->not_ready_yet ) return 0;
-
-	a = gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(ne->widget));
-	if ( !a ) return 0;
-
-	float *old_data = ne->dw->image->data;
-	uint16_t *old_flags = ne->dw->image->flags;
-	float **old_dp = ne->dw->image->dp;
-	int **old_bad = ne->dw->image->bad;
-
-	fail = hdf5_read2(ne->dw->hdfile, ne->dw->image,
-                          ne->dw->ev_list->events[ne->new_ev], 0);
-	if ( fail ) {
-		ERROR("Couldn't load image");
-		return 1;
-	}
-
-	ne->dw->curr_event = ne->new_ev;
-
-	do_filters(ne->dw);
-	displaywindow_update(ne->dw);
-	for (i = 0; i < ne->dw->image->det->n_panels; i++) {
-		free(old_dp[i]);
-		free(old_bad[i]);
-	}
-	free(old_data);
-	free(old_flags);
-	free(old_dp);
-	free(old_bad);
-	return 0;
-}
-
-
-static int displaywindow_update_event_menu(DisplayWindow *dw,
-                                           struct event_list *ev_list,
-                                           int curr_event)
-{
-
-	int ei;
-	GtkWidget *w;
-	GtkWidget *ww;
-	GSList *grp = NULL;
-
-	w = gtk_ui_manager_get_widget(dw->ui, "/ui/displaywindow/events");
-	ww = gtk_menu_new();
-
-	for ( ei=0; ei<ev_list->num_events; ei++ ) {
-
-		GtkWidget *www;
-		struct newev *ne;
-		char *ev_string;
-
-		ev_string = get_event_string(ev_list->events[ei]);
-		www = gtk_radio_menu_item_new_with_label(grp, ev_string);
-		free(ev_string);
-
-		ne = malloc(sizeof(struct newev));
-		if ( ne != NULL ) {
-
-			ne->widget = www;
-			ne->dw = dw;
-			ne->new_ev = ei;
-
-			g_signal_connect(G_OBJECT(www), "toggled",
-			                 G_CALLBACK(displaywindow_newevent), ne);
-
-		}
-
-		if ( ei == dw->curr_event ) {
-			gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(www),
-			                               TRUE);
-		} else {
-			gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(www),
-			                               FALSE);
-		}
-
-		gtk_menu_shell_append(GTK_MENU_SHELL(ww), www);
-
-		grp = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(www));
-		gtk_widget_show_all(www);
-
-	}
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(w), ww);
-
-	return 0;
-}
-
 
 
 static gint displaywindow_release(GtkWidget *widget, GdkEventButton *event,
@@ -2110,168 +2539,6 @@ static gint displaywindow_press(GtkWidget *widget, GdkEventButton *event,
 
 	return 0;
 }
-
-
-static int curr_rg_pointer_index(DisplayWindow *dw)
-{
-	int r;
-
-	for ( r=0; r<dw->image->det->n_rigid_groups; ++r) {
-		if ( dw->image->det->rigid_groups[r] == dw->calib_mode_curr_rg ) {
-			return r;
-		}
-	}
-
-	/* Never reached (we hope) */
-	return 999;
-}
-
-
-static int curr_p_pointer_index(DisplayWindow *dw)
-{
-	int p;
-
-	for ( p=0; p<dw->image->det->n_panels; ++p) {
-		if ( &dw->image->det->panels[p] == dw->calib_mode_curr_p ) {
-			return p;
-		}
-	}
-
-	/* Never reached (we hope) */
-	return 999;
-}
-
-
-static void select_next_group(DisplayWindow *dw, int num_rg)
-{
-	if ( dw->calib_mode_curr_rg == dw->image->det->rigid_groups[num_rg-1] ) {
-		dw->calib_mode_curr_rg = dw->image->det->rigid_groups[0];
-	} else {
-		dw->calib_mode_curr_rg =
-		  dw->image->det->rigid_groups[curr_rg_pointer_index(dw)+1];
-	}
-}
-
-
-static void select_prev_group(DisplayWindow *dw, int num_rg)
-{
-	if ( dw->calib_mode_curr_rg == dw->image->det->rigid_groups[0] ) {
-		dw->calib_mode_curr_rg = dw->image->det->rigid_groups[num_rg-1];
-	} else {
-		dw->calib_mode_curr_rg =
-		  dw->image->det->rigid_groups[curr_rg_pointer_index(dw)-1];
-	}
-}
-
-
-static void select_next_panel(DisplayWindow *dw, int num_p)
-{
-	if ( dw->calib_mode_curr_p == &dw->image->det->panels[num_p-1] ) {
-		dw->calib_mode_curr_p = &dw->image->det->panels[0];
-	} else {
-		dw->calib_mode_curr_p =
-		  &dw->image->det->panels[curr_p_pointer_index(dw)+1];
-	}
-}
-
-
-static void select_prev_panel(DisplayWindow *dw, int num_p)
-{
-	if ( dw->calib_mode_curr_p == &dw->image->det->panels[0] ) {
-		dw->calib_mode_curr_p = &dw->image->det->panels[num_p-1];
-	} else {
-		dw->calib_mode_curr_p =
-		  &dw->image->det->panels[curr_p_pointer_index(dw)-1];
-	}
-}
-
-
-static void toggle_calibmode_groupmode(DisplayWindow *dw)
-{
-	struct rigid_group *rg;
-	struct detector *det = dw->image->det;
-
-	switch ( dw->calib_mode ) {
-
-		case CALIBMODE_NONE:
-		break;
-
-		case CALIBMODE_PANELS:
-		if ( det->n_rigid_groups != det->n_panels ) {
-			/* Only change if there are any rigid groups defined */
-			dw->calib_mode = CALIBMODE_GROUPS;
-			rg = dw->calib_mode_curr_p->rigid_group;
-			dw->calib_mode_curr_rg = rg;
-		} else {
-			/* ...otherwise skip to ALL mode */
-			dw->calib_mode = CALIBMODE_ALL;
-		}
-		break;
-
-		case CALIBMODE_GROUPS:
-		dw->calib_mode = CALIBMODE_ALL;
-		break;
-
-		case CALIBMODE_ALL:
-		dw->calib_mode = CALIBMODE_PANELS;
-		dw->calib_mode_curr_p = dw->calib_mode_curr_rg->panels[0];
-		break;
-
-	}
-}
-
-
-static void calibmode_next(DisplayWindow *dw)
-{
-	int n;
-
-	switch ( dw->calib_mode ) {
-
-		case CALIBMODE_NONE:
-		break;
-
-		case CALIBMODE_PANELS:
-		n = dw->image->det->n_panels;
-		select_next_panel(dw, n);
-		break;
-
-		case CALIBMODE_GROUPS:
-		n = dw->image->det->n_rigid_groups;
-		select_next_group(dw, n);
-		break;
-
-		case CALIBMODE_ALL:
-		break;
-
-	}
-}
-
-
-static void calibmode_prev(DisplayWindow *dw)
-{
-	int n;
-
-	switch ( dw->calib_mode ) {
-
-		case CALIBMODE_NONE:
-		break;
-
-		case CALIBMODE_PANELS:
-		n = dw->image->det->n_panels;
-		select_prev_panel(dw, n);
-		break;
-
-		case CALIBMODE_GROUPS:
-		n = dw->image->det->n_rigid_groups;
-		select_prev_group(dw, n);
-		break;
-
-		case CALIBMODE_ALL:
-		break;
-
-	}
-}
-
 
 static void calibmode_up(DisplayWindow *dw)
 {
@@ -2392,7 +2659,6 @@ static void calibmode_right(DisplayWindow *dw)
 static gint displaywindow_keypress(GtkWidget *widget, GdkEventKey *event,
                                    DisplayWindow *dw)
 {
-	int s;
 
 	if ( !dw->calib_mode ) {
 		return 0;
@@ -2424,41 +2690,40 @@ static gint displaywindow_keypress(GtkWidget *widget, GdkEventKey *event,
 		redraw_window(dw);
 		break;
 
-		case GDK_plus:
 		case GDK_KP_Add:
-		calibmode_next(dw);
-		redraw_window(dw);
+		calibmode_next(NULL, dw);
 		break;
 
-		case GDK_minus:
 		case GDK_KP_Subtract:
-		calibmode_prev(dw);
-		redraw_window(dw);
+		calibmode_prev(NULL, dw);
 		break;
-
-		case GDK_f:
-		dw->calib_mode_show_focus = 1 - dw->calib_mode_show_focus;
-		redraw_window(dw);
-		break;
-
-		case GDK_g:
-		toggle_calibmode_groupmode(dw);
-		redraw_window(dw);
-		break;
-
-		case GDK_s:
-		s = save_geometry_file(dw);
-		if ( s != 0 ) {
-			if ( s != 2 ) {
-				displaywindow_error(dw,
-				       "Unable to save the detector geometry.");
-			}
-		}
-		break;
-
 	}
 
 	return 0;
+}
+
+
+static void impose_twod_geometry(DisplayWindow *dw, const char *twod_element)
+{
+
+	int i;
+
+	for ( i=0; i<dw->image->det->n_panels; i++ ) {
+
+		struct panel *p;
+
+		p = &dw->image->det->panels[i];
+
+		if ( p->data != NULL ) free(p->data);
+		p->data = strdup(twod_element);
+
+		if ( p->dim_structure ) free_dim_structure(p->dim_structure);
+		p->dim_structure = default_dim_structure();
+	}
+
+	dw->image->det->path_dim = 0;
+	dw->image->det->dim_dim = 0;
+
 }
 
 
@@ -2469,16 +2734,16 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
                                   const char *element, const char *event,
                                   struct detector *det_geom,
                                   struct beam_params *beam,
+                                  const char* rgcoll_name,
                                   int show_rings, double *ring_radii,
                                   int n_rings, double ring_size,
                                   int median_filter)
 {
 	DisplayWindow *dw;
-	char *title;
 	GtkWidget *vbox;
 	int check;
 	GtkWidget *w;
-	GtkWidget *ww;
+	char title[1024];
 
 	dw = calloc(1, sizeof(DisplayWindow));
 	if ( dw == NULL ) return NULL;
@@ -2490,7 +2755,7 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	dw->boostint = 1;
 	dw->motion_callback = 0;
 	dw->numbers_window = NULL;
-	dw->simple_geom = NULL;
+	dw->simple = 0;
 	dw->image = NULL;
 	dw->show_rings = show_rings;
 	dw->show_peaks = 0;
@@ -2512,11 +2777,25 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	dw->statusbar = NULL;
 	dw->multi_event = 0;
 	dw->ev_list = NULL;
+	dw->rng = *gsl_rng_alloc(gsl_rng_mt19937);
+	FILE *fh;
+	unsigned long int seed;
+	fh = fopen("/dev/urandom", "r");
+	fread(&seed, sizeof(seed), 1, fh);
+	fclose(fh);
+	gsl_rng_set(&dw->rng, seed);
+
 	if ( geom_filename != NULL ) {
 		dw->geom_filename = strdup(geom_filename);
 	} else {
 		dw->geom_filename = NULL;
 	}
+	if (rgcoll_name != NULL) {
+		dw->rg_coll_name = strdup(rgcoll_name);
+	} else {
+		dw->rg_coll_name = NULL;
+	}
+
 	dw->image->det = det_geom;
 	dw->image->beam = beam;
 	dw->image->lambda = 0.0;
@@ -2528,6 +2807,11 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 		free(dw->geom_filename);
 		free(dw);
 		return NULL;
+	}
+
+	if ( dw->image->det != NULL && element != NULL ) {
+		impose_twod_geometry(dw, element);
+		dw->multi_event = 0;
 	}
 
 	if ( dw->image->det != NULL && ( dw->image->det->path_dim != 0 ||
@@ -2580,6 +2864,7 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 
 	} else {
 		check =	hdf5_read(dw->hdfile, dw->image, element, 0);
+		dw->simple = 1;
 	}
 	if ( check ) {
 		ERROR("Couldn't load file\n");
@@ -2589,11 +2874,6 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	}
 
 	dw->image->filename = strdup(filename);
-
-	if ( dw->image->det == NULL ) {
-		dw->simple_geom = simple_geometry(dw->image);
-		dw->image->det = dw->simple_geom;
-	}
 
 	/* Filters need geometry */
 	do_filters(dw);
@@ -2606,11 +2886,15 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 
 	dw->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	char *bn = safe_basename(filename);
-	title = malloc(strlen(bn)+14);
-	sprintf(title, "%s - hdfsee", bn);
+	if ( dw->multi_event == 0 ) {
+		sprintf(title, "%s - hdfsee", bn);
+	} else {
+		sprintf(title, "%s - event: %s - hdfsee", bn,
+		        get_event_string(dw->ev_list->events[dw->curr_event]));
+	}
+
 	free(bn);
 	gtk_window_set_title(GTK_WINDOW(dw->window), title);
-	free(title);
 
 	g_signal_connect(G_OBJECT(dw->window), "destroy",
 			 G_CALLBACK(displaywindow_closed), dw);
@@ -2637,15 +2921,15 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	w = gtk_ui_manager_get_widget(dw->ui,
 	                   "/ui/displaywindow/view/images");
 
-	if ( dw->image->det != dw->simple_geom ) {
+	if ( !dw->simple ) {
 		gtk_widget_set_sensitive(GTK_WIDGET(w), FALSE);
 	}
 
-	ww = gtk_ui_manager_get_widget(dw->ui, "/ui/displaywindow/events");
-
-	if ( dw->image->det == dw->simple_geom || dw->multi_event == 0) {
-		gtk_widget_set_sensitive(GTK_WIDGET(ww), FALSE);
+	if ( dw->simple || dw->multi_event == 0) {
+		set_events_menu_sensitivity(dw, FALSE);
 	}
+
+	set_calibration_menu_sensitivity(dw, FALSE);
 
 	displaywindow_update(dw);
 
@@ -2665,13 +2949,8 @@ DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
 	g_signal_connect(GTK_OBJECT(dw->drawingarea), "key-press-event",
 	                 G_CALLBACK(displaywindow_keypress), dw);
 
-	if ( dw->image->det == dw->simple_geom ) {
+	if ( dw->simple ) {
 		displaywindow_update_menus(dw, element);
-	} else {
-		if ( dw->multi_event ) {
-			displaywindow_update_event_menu(dw, dw->ev_list,
-			                                dw->curr_event);
-		}
 	}
 
 	dw->not_ready_yet = 0;

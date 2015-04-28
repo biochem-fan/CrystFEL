@@ -180,6 +180,7 @@ struct image {
 	char                    *filename;
 	struct event            *event;
 	const struct copy_hdf5_field *copyme;
+	struct stuff_from_stream *stuff_from_stream;
 
 	int                     id;   /* ID number of the thread
 	                               * handling this image */
@@ -224,6 +225,10 @@ extern struct imagefeature *image_feature_closest(ImageFeatureList *flist,
                                                   double fs, double ss,
                                                   double *d, int *idx,
                                                   struct detector *det);
+extern Reflection *image_reflection_closest(RefList *rlist,
+                                            double fs, double ss,
+                                            struct detector *det,
+                                            double *d);
 
 extern int image_feature_count(ImageFeatureList *flist);
 extern struct imagefeature *image_get_feature(ImageFeatureList *flist, int idx);

@@ -3,12 +3,12 @@
  *
  * Stream tools
  *
- * Copyright © 2013-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2013-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  *
  * Authors:
- *   2010-2014 Thomas White <taw@physics.org>
+ *   2010-2015 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *   2011      Richard Kirian
  *   2011      Andrew Aquila
@@ -59,7 +59,6 @@
 #define AT_LEAST_VERSION(st, a, b) ((st->major_version>=(a)) \
                                     && (st->minor_version>=(b)))
 
-
 struct _stream
 {
 	FILE *fh;
@@ -81,7 +80,7 @@ static int read_peaks(FILE *fh, struct image *image)
 		float x, y, d, intensity;
 		int r;
 		struct panel *p = NULL;
-		int add_x, add_y;
+		float add_x, add_y;
 
 		rval = fgets(line, 1023, fh);
 		if ( rval == NULL ) continue;
@@ -141,7 +140,7 @@ static int read_peaks_2_3(FILE *fh, struct image *image)
 		float x, y, d, intensity;
 		int r;
 		struct panel *p = NULL;
-		int add_x, add_y;
+		float add_x, add_y;
 
 		rval = fgets(line, 1023, fh);
 		if ( rval == NULL ) continue;
@@ -211,8 +210,8 @@ static int write_peaks(struct image *image, FILE *ofh)
 				return 1;
 			}
 
-			/* Convert coordinates to match arrangement of panels in HDF5
-			 * file */
+			/* Convert coordinates to match arrangement of panels in
+			 * HDF5 file */
 			write_fs = f->fs - p->min_fs + p->orig_min_fs;
 			write_ss = f->ss - p->min_ss + p->orig_min_ss;
 
@@ -588,7 +587,8 @@ static int write_stream_reflections_2_2(FILE *fh, RefList *list,
 
 			fprintf(fh, "%4i %4i %4i %10.2f %10.2f %10.2f %10.2f"
 			            " %6.1f %6.1f\n",
-			        h, k, l, intensity, esd_i, pk, bg, write_fs, write_ss);
+			        h, k, l, intensity, esd_i, pk, bg, write_fs,
+			        write_ss);
 
 		} else {
 
@@ -708,6 +708,10 @@ static int write_crystal(Stream *st, Crystal *cr, int include_reflections)
 	rad = crystal_get_profile_radius(cr);
 	fprintf(st->fh, "profile_radius = %.5f nm^-1\n", rad/1e9);
 
+	if ( crystal_get_notes(cr) != NULL ) {
+		fprintf(st->fh, "%s\n", crystal_get_notes(cr));
+	}
+
 	reflist = crystal_get_reflections(cr);
 	if ( reflist != NULL ) {
 
@@ -735,14 +739,19 @@ static int write_crystal(Stream *st, Crystal *cr, int include_reflections)
 
 			fprintf(st->fh, REFLECTION_START_MARKER"\n");
 			if ( AT_LEAST_VERSION(st, 2, 3) ) {
-				ret = write_stream_reflections_2_3(st->fh, reflist,
+				ret = write_stream_reflections_2_3(st->fh,
+				                                   reflist,
 				                                   image);
 			} else if ( AT_LEAST_VERSION(st, 2, 2) ) {
-				ret = write_stream_reflections_2_2(st->fh, reflist, image);
+				ret = write_stream_reflections_2_2(st->fh,
+			                                           reflist,
+			                                           image);
 			} else {
 				/* This function writes like a normal reflection
 				 * list was written in stream 2.1 */
-				ret = write_stream_reflections_2_1(st->fh, reflist, image);
+				ret = write_stream_reflections_2_1(st->fh,
+				                                   reflist,
+				                                   image);
 			}
 			fprintf(st->fh, REFLECTION_END_MARKER"\n");
 
@@ -983,9 +992,11 @@ static void read_crystal(Stream *st, struct image *image, StreamReadFlags srf)
 				reflist = read_stream_reflections_2_3(st->fh,
                                                       image->det);
 			} else if ( AT_LEAST_VERSION(st, 2, 2) ) {
-				reflist = read_stream_reflections_2_2(st->fh, image->det);
+				reflist = read_stream_reflections_2_2(st->fh,
+				          image->det);
 			} else {
-				reflist = read_stream_reflections_2_1(st->fh, image->det);
+				reflist = read_stream_reflections_2_1(st->fh,
+				          image->det);
 			}
 			if ( reflist == NULL ) {
 				ERROR("Failed while reading reflections\n");
@@ -1044,6 +1055,39 @@ static void read_crystal(Stream *st, struct image *image, StreamReadFlags srf)
 }
 
 
+static int read_and_store_hdf5_field(struct image *image, const char *line)
+{
+
+	char **new_fields;
+
+	if ( image->stuff_from_stream == NULL ) {
+		image->stuff_from_stream =
+		       malloc(sizeof(struct stuff_from_stream));
+		if ( image->stuff_from_stream == NULL) {
+			ERROR("Failed reading hdf5 entries from "
+			      "stream\n");
+			return 1;
+		}
+		image->stuff_from_stream->fields = NULL;
+		image->stuff_from_stream->n_fields = 0;
+	}
+
+	new_fields = realloc(image->stuff_from_stream->fields,
+			     (1+image->stuff_from_stream->n_fields)*
+			     sizeof(char *));
+	if ( new_fields == NULL ) {
+		ERROR("Failed reading hdf5 entries from stream\n");
+		return 1;
+	}
+	image->stuff_from_stream->fields = new_fields;
+	image->stuff_from_stream->fields[image->stuff_from_stream->n_fields]
+							     = strdup(line);
+	image->stuff_from_stream->n_fields++;
+
+	return 0;
+}
+
+
 /* Read the next chunk from a stream and fill in 'image' */
 int read_chunk_2(Stream *st, struct image *image,  StreamReadFlags srf)
 {
@@ -1059,6 +1103,7 @@ int read_chunk_2(Stream *st, struct image *image,  StreamReadFlags srf)
 	image->crystals = NULL;
 	image->n_crystals = 0;
 	image->event = NULL;
+	image->stuff_from_stream = NULL;
 
 	if ( (srf & STREAM_READ_REFLECTIONS) || (srf & STREAM_READ_UNITCELL) ) {
 		srf |= STREAM_READ_CRYSTALS;
@@ -1140,6 +1185,17 @@ int read_chunk_2(Stream *st, struct image *image,  StreamReadFlags srf)
 			}
 		}
 
+		if ( strncmp(line, "hdf5", 3) == 0 ) {
+
+			int fail;
+
+			fail = read_and_store_hdf5_field(image, line);
+			if ( fail ) {
+				ERROR("Failed to read hd5 fields from stream.\n");
+				return 1;
+			}
+		}
+
 		if ( (srf & STREAM_READ_PEAKS)
 		    && strcmp(line, PEAK_LIST_START_MARKER) == 0 ) {
 
@@ -1208,7 +1264,12 @@ Stream *open_stream_for_read(const char *filename)
 	st = malloc(sizeof(struct _stream));
 	if ( st == NULL ) return NULL;
 
-	st->fh = fopen(filename, "r");
+	if ( strcmp(filename, "-") == 0 ) {
+		st->fh = stdin;
+	} else {
+		st->fh = fopen(filename, "r");
+	}
+
 	if ( st->fh == NULL ) {
 		free(st);
 		return NULL;
@@ -1447,7 +1508,7 @@ void write_geometry_file(Stream *st, const char *geom_filename) {
 
 	do {
 		rval = fgets(line, 1023, geom_fh);
-		fputs(line, st->fh);
+		if ( rval != NULL ) fputs(line, st->fh);
 	} while ( rval != NULL );
 
 	fclose(geom_fh);
@@ -1473,3 +1534,4 @@ int rewind_stream(Stream *st)
 {
 	return fseek(st->fh, 0, SEEK_SET);
 }
+

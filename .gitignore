@@ -35,6 +35,9 @@ src/check_hkl
 src/partial_sim
 src/cell_explorer
 src/ambigator
+src/whirligig
+src/geoptimiser
+src/list_events
 src/.dirstamp
 *~
 doc/reference/libcrystfel/*
@@ -53,3 +56,5 @@ lib/dummy.lo
 lib/libgnu.la
 libcrystfel/crystfel.pc
 version.h
+tests/*.log
+tests/*.trs

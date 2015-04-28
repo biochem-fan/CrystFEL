@@ -1,7 +1,7 @@
 /*
- * peaks.h
+ * rejection.h
  *
- * Peak search and other image analysis
+ * Crystal rejection for scaling
  *
  * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
@@ -26,38 +26,18 @@
  *
  */
 
-#ifndef PEAKS_H
-#define PEAKS_H
+#ifndef REJECTION_H
+#define REJECTION_H
+
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
 
-#include <pthread.h>
 
-#include "reflist.h"
 #include "crystal.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+extern void early_rejection(Crystal **crystals, int n);
+extern void check_rejection(Crystal **crystals, int n);
 
-extern int *make_BgMask(struct image *image, struct panel *p, double ir_inn);
-
-extern void search_peaks(struct image *image, float threshold,
-                         float min_gradient, float min_snr,
-                         double ir_inn, double ir_mid, double ir_out,
-                         int use_saturated);
-
-extern int peak_sanity_check(struct image *image, Crystal **crystals,
-                             int n_cryst);
-
-extern void validate_peaks(struct image *image, double min_snr,
-                           int ir_inn, int ir_mid, int ir_out,
-                           int use_saturated, int check_snr);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif	/* PEAKS_H */
+#endif	/* REJECTION_H */

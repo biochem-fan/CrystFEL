@@ -1,7 +1,8 @@
 .\"
 .\" Geometry man page
 .\"
-.\" Copyright © 2012-2014 Thomas White <taw@physics.org>
+.\" Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
+.\"                       a research centre of the Helmholtz Association.
 .\"
 .\" Part of CrystFEL - crystallography with a FEL
 .\"
@@ -13,14 +14,14 @@ CRYSTFEL DETECTOR GEOMETRY DESCRIPTION FILES
 .SH CRYSTFEL DETECTOR GEOMETRY FILES
 The detector geometry is taken from a text file rather than hardcoded into the
 program.  Programs which care about the geometry (particularly
-\fBindexamajig\fR and \fBpattern_sim\fR take an argument
+\fBindexamajig\fR and \fBpattern_sim\fR) take an argument
 \fB--geometry=\fR\fIfilename\fR, where \fIfilename\fR contains the geometry.
 .PP
 A flexible (and pedantic) representation of the detector has been developed to
 avoid all possible sources of ambiguity.  CrystFEL's representation of a
 detector is broken down into one or more "panels", each of which has its own
-camera length, geometry, resolution and so on.  Each panel fits into the overall
-image taken from the HDF5 file, defined by minimum and maximum coordinates in
+camera length, geometry, resolution and so on.  Each panel fits into an overall
+data block taken from the HDF5 file, defined by minimum and maximum coordinates in
 the "fast scan" and "slow scan" directions.  "Fast scan" refers to the direction
 whose coordinate changes most quickly as the bytes in the HDF5 file are moved
 through.  The coordinates are specified inclusively, meaning that a minimum of 0
@@ -31,7 +32,7 @@ In the current version, panels are assumed to be perpendicular to the incident
 beam and to have their edges parallel.  Within these limitations, any geometry
 can be constructed.
 
-The job of the geometry file is to establish a relationship between the array
+The job of the geometry file is to establish a relationship an array
 of pixel values in the HDF5 file, defined in terms only of the "fast scan" and
 "slow scan" directions, and the laboratory coordinate system defined as follows:
 
@@ -49,19 +50,24 @@ Naively speaking, this means that CrystFEL looks at the images from the "into th
 beam" perspective, but please avoid thinking of things in this way.  It's much
 better to consider the precise way in which the coordinates are mapped.
 
+Some file formats store data for multiple patterns ("events") within a single file.
+Information about the layout of the file data can be included in the geometry file.
+This allows CrystFEL to unambigously identify data blocks which contain
+data for a specific event, and to determine the number of events that each file contains.
+
 The geometry file should contain lines of the following form:
 
 .IP
-\fIpanel\fR\fB/\fIproperty\fB = \fIvalue\fR
+\fIpanel\fR/clen = 0.560
 
 .PP
-\fIpanel\fR can be any name of your choosing.  You can make up names for your panels however you please, as long as the first three letters are not "\fBbad\fR" (in lower case), because this is used to identify bad regions.
+\fIpanel\fR can be any name of your choosing.  You can make up names for your panels however you please, as long as the first three letters are not "\fBbad\fR" or "rigid_group" (in lower case), because these are used for special purposes (see below).
 
 .PP
 You can also specify values without a panel name, for example:
 
 .IP
-peak_sep = 6.0
+clen = 0.560
 
 .PP
 In this case, the value will be used for all \fBsubsequent\fR panels appearing in the file which do not have their own specific values for the property, or until you specify another default value further down the file.  Panel-specific values always have priority over default values, and changing the default value has no effect for panels which had already be mentioned at the point in the file where the default value was specified.
@@ -75,7 +81,45 @@ The properties which can be set are:
 .PD 0
 .IP \fBdata\fR
 .PD
-The location in the HDF5 file of the data block that contains the panel's data. If this property is not set, the first 2-dimensional data block in the file hierarchy will be used as data source.
+The location in the HDF5 file of the data block that contains the panel's data. If this property is not set, the first 2-dimensional data block in the file hierarchy will be used as data source. If the HDF5 file contains multiple events, and each event is stored in a different data block, the variable part of the path can be represented using the % character placeholder.
+
+Example:
+.IP
+data = /data/%/rawdata
+
+The CrystFEL programs will look for the first event at /data/event1_name/rawdata, for the second at /data/event2_name/rawdata, etc.
+
+.PD 0
+.IP \fBdim\fIn\fR\fR
+.PD
+Information about the layout of the data block identified by the 'data' property. \fIn\fR is an integer number identifying an axis in a multidimensional HDF5 data block. The property value defines the kind of information encoded by the axis. Possible values are:
+.RS
+.IP %
+.PD
+event placeholder,the axis encodes events
+.IP ss
+.PD
+the axis encoding the slow scan index
+.IP fs
+.PD
+the axis encodes the fast scan index
+.RE
+.IP
+CrystFEL assumes that the data block defined by the 'data' property has a dimensionality equal to the axis with the highest value of \fIn\fR defined by the 'dim' property, and requires the user to provide information about each of the axes in the data block. When no 'dim' property is defined in the geometry file, CrystFEL assumes the data block to be 2-dimensional, with the two axes encoding slow scan and fast scan information respectively.
+.IP
+Note that this does indeed mean that you can assign the fast scan coordinates to the slow scan axis of the data block, and vice versa!  This "quirk" helps backwards compatibility with geometry files from older versions of CrystFEL.
+
+Example:
+.RS
+.IP
+dim0 = %
+.IP
+dim1 = ss
+.IP
+dim2 = fs
+.RE
+.IP
+The above snippet specifies that the data block is 3-dimensional. The first axis represents the event number, the second the slow scan panel coordinate, and the third the fast scan panel coordinate.
 
 .PD 0
 .IP \fBmin_fs\fR
@@ -88,7 +132,7 @@ The range of pixels in the data block specified by the 'data' property that corr
 .PD 0
 .IP \fBadu_per_eV\fR
 .PD
-The number of detector intensity units (ADU) which will arise from one electron-Volt of photon energy.  This is used to estimate Poisson errors.
+The number of detector intensity units (ADU) which will arise from one electron-Volt of photon energy.  This is used to estimate Poisson errors.  Note that setting different values for this parameter for different panels does \fBnot\fR result in the intensities being scaled accordingly.
 
 .PD 0
 .IP \fBbadrow_direction\fR
@@ -104,7 +148,9 @@ The resolution (in pixels per metre) for this panel.  This is one over the pixel
 .PD 0
 .IP \fBclen\fR
 .PD
-The camera length (in metres) for this panel. You can also specify the HDF path to a scalar floating point value containing the camera length in millimetres.  For example: "panel0/clen = /LCLS/detectorPosition".  See \fBcoffset\fR as well.
+The camera length (in metres) for this panel. You can also specify the HDF5 path to a floating point data block containing the camera length in millimetres.  For example: "panel0/clen = /LCLS/detectorPosition".  If the HDF5 file contains more than one event, and the data block is scalar, the camera length value
+it contains will be used for all events. If, however, the data block is multidimensional and the second dimension is bigger than one, the CrystFEL programs will try to match the content of the data block with the events in the file, assigning the first value in the data block to the first event in the file,
+the second value in the data block to the second event in the file, etc. See \fBcoffset\fR as well.
 
 .PD 0
 .IP \fBcoffset\fR
@@ -140,7 +186,7 @@ Set this to 1 or "true" to ignore this panel completely.
 .IP \fBmask_bad\fR
 .PD
 Bitmasks for bad pixel masks. The pixel is considered good if all of the bits which are set in \fBmask_good\fR are set, \fIand\fR if none of the bits which are set in \fBmask_bad\fR are set. Example:
-.br
+.IP
 mask = /processing/hitfinder/masks
 .br
 mask_good = 0x27
@@ -150,7 +196,9 @@ mask_bad = 0x00
 
 .SH BAD REGIONS
 
-You can also specify bad regions.  Peaks with centroid locations within such a region will not be integrated nor used for indexing.  Bad regions are specified in pixel units, either in the lab coordinate system (see above) or in fast scan/slow scan coordinates (mixtures are not allowed).   In the latter case, the range of pixels is specified \fIinclusively\fR.  Bad regions are distinguished from normal panels by the fact that they begin with the three letters "bad".
+You can also specify bad regions.  Bad regions will be completely ignored by CrystFEL.  Bad regions are specified in pixel units, either in the lab coordinate system (see above) or in fast scan/slow scan coordinates (mixtures are not allowed).   In the latter case, the range of pixels is specified \fIinclusively\fR.  Bad regions are distinguished from normal panels by the fact that they begin with the three letters "bad".
+.PP
+You can specify a panel name for the bad region, in which case the pixels will only be considered bad if they are within the range you specify \fIand\fR in the panel you specify.  This might be necessary if your HDF5 file layout has overlapping ranges of fs/ss coordinates for different panels (e.g. if the data blocks for the panels are in different HDF5 datasets).
 
 Examples:
 .br
@@ -171,10 +219,47 @@ badregionB/max_fs = 160
 badregionB/min_ss = 256
 .br
 badregionB/max_ss = 512
+.br
+badregionB/panel = q0a1
 
+
+.SH RIGID GROUPS AND RIGID GROUP COLLECTIONS
+
+Some operations in CrystFEL, such as refining the detector geometry, need a group of panels to be treated as a single rigid body.  Such "rigid groups" might describe the fact that certain panels are physically connected to one another, for example, a pair of adjacent ASICs in the CSPAD detector.  Rigid groups can be defined in the geometry file by listing the panels belonging to each group and assigning the group a name, like this:
+.RS
+.IP "\fBrigid_group_\fIname\fR = \fIpanel1\fR,\fIpanel2\fR"
+.RE
+.PP
+This creates a rigid group called \fIname\fR, containing panels \fIpanel1\fR and \fIpanel2\fR.
+.PP
+You can specify multiple sets of rigid groups.  For example, as well as specifying the relationships between pairs of ASICs mentioned above, you may also want to specify that certain groups of panels belong to an independently-movable quadrant of the detector.  You can declare and name such "rigid group collections" as follows:
+.RS
+.IP "\fBrigid_group_collection_\fIname\fR = \fIrigidgroup1\fR,\fIrigidgroup2\fR"
+.RE
+.PP
+This creates a rigid group collection called \fIname\fR, containing rigid groups \fIrigidgroup1\fR and \fIrigidgroup2\fR.
+.PP
+Definitions of rigid groups and rigid group collections can appear at any place in the geometry file and can be declared using the following global properties.  They are not panel properties, and therefore don't follow the usual panel/property syntax.  You can assign any number of panels to a rigid group, and any number of rigid groups to a rigid group collection.  A panel can be a member of any number of rigid groups.
 
 .PP
 See the "examples" folder for some examples (look at the ones ending in .geom).
+
+.SH BEAM CHARACTERISTICS
+
+The geometry file can include information about beam characteristics, using general properties, that can appear anywhere in the geometry file and do not follow the usual panel/property syntax. The following beam properties are supported:
+
+.PD 0
+.IP \fBphoton_energy\fR
+.PD
+The beam photon energy in eV. You can also specify the HDF5 path to a floating point data block value containing the photon energy in eV.  For example: "photon_energy = /LCLS/photon_energy_eV".  If the HDF5 file contains more than one event, and the data block is scalar, the photon energy value
+it contains will be used for all events. If, however, the data block is multidimensional and the second dimension is bigger than one, the CrystFEL programs will try to match the content of the data block with the events in the file, assigning the first value in the data block to the first event in the file,
+the second value in the data block to the second event in the file, etc. See also \fBphoton_energy_scale\fR.
+
+.PD 0
+.IP \fBphoton_energy_scale\fR
+.PD
+Sometimes the photon energy value recorded in an HDF5 file differs from the true photon energy value by a multiplication factor. This property defines a correction factor that is applied by the CrystFEL programs. The photon energy value read from a file is multiplied by the value of this property if the property is defined in the geometry file.
+
 
 .SH AUTHOR
 This page was written by Thomas White and Valerio Mariani.
@@ -183,7 +268,7 @@ This page was written by Thomas White and Valerio Mariani.
 Report bugs to <taw@physics.org>, or visit <http://www.desy.de/~twhite/crystfel>.
 
 .SH COPYRIGHT AND DISCLAIMER
-Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY, a research centre of the Helmholtz Association.
+Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY, a research centre of the Helmholtz Association.
 .P
 CrystFEL is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 .P

@@ -59,6 +59,12 @@ typedef struct {
 } RingRadiusDialog;
 
 
+typedef struct {
+	GtkWidget	*window;
+	GtkWidget	*entry;
+} EventDialog;
+
+
 struct numberswindow {
 	GtkWidget *window;
 	GtkWidget *labels[17*17];
@@ -83,6 +89,9 @@ typedef struct {
 	GtkWidget	*scrollarea;
 	GtkUIManager	*ui;
 	GtkActionGroup	*action_group;
+	GtkActionGroup	*calibration_action_group;
+	GtkActionGroup	*events_action_group;
+
 	int             n_pixbufs;
 	GdkPixbuf	**pixbufs;
 	gulong		motion_callback;
@@ -90,17 +99,19 @@ typedef struct {
 
 	int             not_ready_yet;
 
-	struct detector *simple_geom;
+	int             simple;
 
 	struct hdfile	*hdfile;
 	struct image	*image;
 
 	char            *geom_filename;
+	char            *rg_coll_name;
 
 	/* Dialog boxes */
 	BinningDialog  *binning_dialog;
 	BoostIntDialog *boostint_dialog;
 	RingRadiusDialog *ringradius_dialog;
+	EventDialog *event_dialog;
 	struct numberswindow *numbers_window;
 
 	int		width;
@@ -121,8 +132,9 @@ typedef struct {
 	int             n_rings;
 
 	CalibMode       calib_mode;
-	struct rigid_group *calib_mode_curr_rg;
-	struct panel    *calib_mode_curr_p;
+	struct rg_collection      *rg_coll;
+	struct rigid_group  *calib_mode_curr_rg;
+	struct panel	*calib_mode_curr_p;
 	int             calib_mode_show_focus;
 	GtkWidget       *statusbar;
 
@@ -134,6 +146,7 @@ typedef struct {
 	struct event_list  *ev_list;
 	int                curr_event;
 
+	gsl_rng          rng;
 
 
 } DisplayWindow;
@@ -147,7 +160,7 @@ extern DisplayWindow *displaywindow_open(char *filename, char *geom_filename,
                                          const char *event,
                                          struct detector *det_geom,
                                          struct beam_params *beam,
-                                         int show_rings,
+                                         const char *rgcoll_name, int show_rings,
                                          double *ring_radii, int n_rings,
                                          double ring_size, int median_filter);
 

@@ -3,11 +3,11 @@
  *
  * The processing pipeline for one image
  *
- * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2010-2014 Thomas White <taw@physics.org>
+ *   2010-2015 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
@@ -41,6 +41,7 @@
 enum {
 	PEAK_ZAEF,
 	PEAK_HDF5,
+	PEAK_CXI,
 };
 
 
@@ -62,9 +63,7 @@ struct index_args
 	int peaks;                /* Peak detection method */
 	float tols[4];
 	struct beam_params *beam;
-	char *element;
 	char *hdf5_peak_path;
-	int cxi_hdf5_peaks;
 	float pk_inn;
 	float pk_mid;
 	float pk_out;
@@ -84,6 +83,9 @@ struct index_args
 	signed int int_diag_l;
 	float push_res;
 	float highres;
+	float fix_profile_r;
+	float fix_bandwidth;
+	float fix_divergence;
 };
 
 

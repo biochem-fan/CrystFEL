@@ -5,7 +5,7 @@ ACLOCAL_AMFLAGS = -I m4
 
 bin_PROGRAMS = src/pattern_sim src/process_hkl src/get_hkl src/indexamajig \
                src/compare_hkl src/partialator src/check_hkl src/partial_sim \
-               src/ambigator
+               src/ambigator src/geoptimiser src/whirligig src/list_events
 
 noinst_PROGRAMS = tests/list_check tests/integration_check \
                   tests/pr_p_gradient_check tests/symmetry_check \
@@ -27,6 +27,7 @@ TESTS = tests/list_check $(MERGE_CHECKS) $(PARTIAL_CHECKS) \
         tests/cell_check tests/ring_check tests/prof2d_check tests/ambi_check
 
 EXTRA_DIST += $(MERGE_CHECKS) $(PARTIAL_CHECKS)
+EXTRA_DIST += relnotes-0.6.0
 
 if BUILD_HDFSEE
 bin_PROGRAMS += src/hdfsee
@@ -68,6 +69,8 @@ endif
 
 src_process_hkl_SOURCES = src/process_hkl.c
 
+src_list_events_SOURCES = src/list_events.c
+
 src_indexamajig_SOURCES = src/indexamajig.c src/im-sandbox.c src/process_image.c
 
 if BUILD_HDFSEE
@@ -89,9 +92,13 @@ src_render_hkl_SOURCES = src/render_hkl.c
 endif
 
 src_partialator_SOURCES = src/partialator.c src/post-refinement.c \
-                          src/hrs-scaling.c
+                          src/hrs-scaling.c src/rejection.c
 
 src_ambigator_SOURCES = src/ambigator.c
+
+src_geoptimiser_SOURCES = src/geoptimiser.c src/hdfsee-render.c
+
+src_whirligig_SOURCES = src/whirligig.c
 
 if HAVE_CAIRO
 if HAVE_PANGO
@@ -128,7 +135,8 @@ EXTRA_DIST += src/dw-hdfsee.h src/hdfsee.h src/render_hkl.h \
               src/post-refinement.h src/hrs-scaling.h src/scaling-report.h \
               src/cl-utils.h src/hdfsee-render.h src/diffraction.h \
               src/diffraction-gpu.h src/pattern_sim.h src/list_tmp.h \
-              src/im-sandbox.h src/process_image.h src/multihistogram.h
+              src/im-sandbox.h src/process_image.h src/multihistogram.h \
+              src/rejection.h
 
 crystfeldir = $(datadir)/crystfel
 crystfel_DATA = data/diffraction.cl data/hdfsee.ui
@@ -139,7 +147,8 @@ man_MANS = doc/man/crystfel.7 doc/man/check_hkl.1 doc/man/compare_hkl.1 \
            doc/man/crystfel_geometry.5 doc/man/get_hkl.1 doc/man/hdfsee.1 \
            doc/man/indexamajig.1 doc/man/partialator.1 doc/man/partial_sim.1 \
            doc/man/pattern_sim.1 doc/man/process_hkl.1 doc/man/render_hkl.1 \
-           doc/man/cell_explorer.1 doc/man/ambigator.1
+           doc/man/cell_explorer.1 doc/man/ambigator.1 doc/man/geoptimiser.1 \
+           doc/man/whirligig.1
 
 
 EXTRA_DIST += $(man_MANS)
@@ -149,10 +158,11 @@ crystfeldoc_DATA = doc/twin-calculator.pdf doc/examples/lcls-dec.geom \
                    doc/examples/lcls-june-r0013-r0128.geom \
                    doc/examples/lcls-xpp-estimate.geom \
                    doc/examples/simple.geom \
-                   doc/examples/cspad-feb2011.geom \
+                   doc/examples/cspad-single.geom \
+                   doc/examples/cspad-cxiformat.geom \
                    doc/examples/pilatus.geom \
                    doc/examples/cell-example.cell \
-		   doc/hitrate.html doc/hitrate.png
+                   doc/hitrate.html doc/hitrate.png
 
 EXTRA_DIST += $(crystfeldoc_DATA) doc/twin-calculator.odt \
               doc/reference/libcrystfel/xml/coding-standards.xml
@@ -170,7 +180,8 @@ script_DATA = scripts/alternate-stream scripts/cell-please \
               scripts/Rsplit_surface scripts/Rsplit_surface.py \
               scripts/clean-stream.py scripts/fg-graph scripts/truncate-stream \
               scripts/gen-sfs-expand scripts/add-beam-params \
-              scripts/find-pairs scripts/plot-cc-and-scale.R
+              scripts/find-pairs scripts/plot-cc-and-scale.R \
+              scripts/ave-resolution scripts/crystal-frame-number
 
 EXTRA_DIST += $(script_DATA)
 

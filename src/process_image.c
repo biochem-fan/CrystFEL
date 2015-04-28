@@ -3,11 +3,11 @@
  *
  * The processing pipeline for one image
  *
- * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2010-2014 Thomas White <taw@physics.org>
+ *   2010-2015 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
  *
  * This file is part of CrystFEL.
@@ -54,69 +54,113 @@
 
 static int cmpd2(const void *av, const void *bv)
 {
-	double *ap, *bp;
 	double a, b;
 
-	ap = (double *)av;
-	bp = (double *)bv;
-
-	a = ap[1];
-	b = bp[1];
+	a = *(double *)av;
+	b = *(double *)bv;
 
 	if ( fabs(a) < fabs(b) ) return -1;
 	return 1;
 }
 
 
-static void refine_radius(Crystal *cr)
+static double *excitation_errors(UnitCell *cell, ImageFeatureList *flist,
+                                 RefList *reflist, int *pnacc)
 {
-	Reflection *refl;
-	RefListIterator *iter;
-	double vals[num_reflections(crystal_get_reflections(cr))*2];
-	int n = 0;
 	int i;
-	double ti = 0.0;  /* Total intensity */
+	const double min_dist = 0.25;
+	double *acc;
+	int n_acc = 0;
+	int n_notintegrated = 0;
+	int max_acc = 1024;
 
-	for ( refl = first_refl(crystal_get_reflections(cr), &iter);
-	      refl != NULL;
-	      refl = next_refl(refl, iter) )
-	{
-		double rlow, rhigh, p;
-		int val = 0;
+	acc = malloc(max_acc*sizeof(double));
+	if ( acc == NULL ) {
+		ERROR("Allocation failed when refining radius!\n");
+		return NULL;
+	}
 
-		if ( get_intensity(refl) > 9.0*get_esd_intensity(refl) ) {
-			val = 1;
+	for ( i=0; i<image_feature_count(flist); i++ ) {
+
+		struct imagefeature *f;
+		double h, k, l, hd, kd, ld;
+
+		/* Assume all image "features" are genuine peaks */
+		f = image_get_feature(flist, i);
+		if ( f == NULL ) continue;
+
+		double ax, ay, az;
+		double bx, by, bz;
+		double cx, cy, cz;
+
+		cell_get_cartesian(cell,
+		                   &ax, &ay, &az, &bx, &by, &bz, &cx, &cy, &cz);
+
+		/* Decimal and fractional Miller indices of nearest
+		 * reciprocal lattice point */
+		hd = f->rx * ax + f->ry * ay + f->rz * az;
+		kd = f->rx * bx + f->ry * by + f->rz * bz;
+		ld = f->rx * cx + f->ry * cy + f->rz * cz;
+		h = lrint(hd);
+		k = lrint(kd);
+		l = lrint(ld);
+
+		/* Check distance */
+		if ( (fabs(h - hd) < min_dist)
+		  && (fabs(k - kd) < min_dist)
+		  && (fabs(l - ld) < min_dist) )
+		{
+			double rlow, rhigh, p;
+			Reflection *refl;
+
+			/* Dig out the reflection */
+			refl = find_refl(reflist, h, k, l);
+			if ( refl == NULL ) {
+				n_notintegrated++;
+				continue;
+			}
+
+			get_partial(refl, &rlow, &rhigh, &p);
+			acc[n_acc++] = fabs(rlow+rhigh)/2.0;
+			if ( n_acc == max_acc ) {
+				max_acc += 1024;
+				acc = realloc(acc, max_acc*sizeof(double));
+				if ( acc == NULL ) {
+					ERROR("Allocation failed during"
+					      " estimate_resolution!\n");
+					return NULL;
+				}
+			}
 		}
 
-		get_partial(refl, &rlow, &rhigh, &p);
-
-		vals[(2*n)+0] = val;
-		vals[(2*n)+1] = fabs((rhigh+rlow)/2.0);
-		n++;
-
 	}
 
-	/* Sort in ascending order of absolute "deviation from Bragg" */
-	qsort(vals, n, sizeof(double)*2, cmpd2);
-
-	/* Calculate cumulative number of very strong reflections as a function
-	 * of absolute deviation from Bragg */
-	for ( i=0; i<n-1; i++ ) {
-		ti += vals[2*i];
-		vals[2*i] = ti;
+	if ( n_acc < 3 ) {
+		STATUS("WARNING: Too few peaks to estimate profile radius.\n");
+		return NULL;
 	}
 
-	if ( ti < 10 ) {
-		ERROR("WARNING: Not enough strong reflections (%.0f) to estimate "
-		      "crystal parameters (trying anyway).\n", ti);
-	}
+	*pnacc = n_acc;
+	return acc;
+}
 
-	/* Find the cutoff where we get 90% of the strong spots */
-	for ( i=0; i<n-1; i++ ) {
-		if ( vals[2*i] > 0.90*ti ) break;
-	}
 
-	crystal_set_profile_radius(cr, fabs(vals[2*i+1]));
+static void refine_radius(Crystal *cr, ImageFeatureList *flist)
+{
+	int n = 0;
+	int n_acc;
+	double *acc;
+
+	acc = excitation_errors(crystal_get_cell(cr), flist,
+	                        crystal_get_reflections(cr), &n_acc);
+	if ( acc == NULL ) return;
+
+	qsort(acc, n_acc, sizeof(double), cmpd2);
+	n = n_acc/50;
+	if ( n < 2 ) n = 2; /* n_acc is always >= 2 */
+	crystal_set_profile_radius(cr, acc[(n_acc-1)-n]);
+
+	free(acc);
 }
 
 
@@ -142,10 +186,11 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	image.filename = pargs->filename_p_e->filename;
 	image.event = pargs->filename_p_e->ev;
 	image.beam = iargs->beam;
-	image.det = iargs->det;
+	image.det = copy_geom(iargs->det);
 	image.crystals = NULL;
 	image.n_crystals = 0;
 	image.serial = serial;
+	image.indexed_by = INDEXING_NONE;
 
 	hdfile = hdfile_open(image.filename);
 	if ( hdfile == NULL ) {
@@ -177,11 +222,21 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	switch ( iargs->peaks ) {
 
 		case PEAK_HDF5:
-		/* Get peaks from HDF5 */
-
-		if ( get_peaks(&image, hdfile, iargs->hdf5_peak_path,
-		               iargs->cxi_hdf5_peaks, pargs->filename_p_e) ) {
+		if ( get_peaks(&image, hdfile, iargs->hdf5_peak_path) ) {
 			ERROR("Failed to get peaks from HDF5 file.\n");
+		}
+		if ( !iargs->no_revalidate ) {
+			validate_peaks(&image, iargs->min_snr,
+				       iargs->pk_inn, iargs->pk_mid,
+		                       iargs->pk_out, iargs->use_saturated,
+				       iargs->check_hdf5_snr);
+		}
+		break;
+
+		case PEAK_CXI:
+		if ( get_peaks_cxi(&image, hdfile, iargs->hdf5_peak_path,
+		                   pargs->filename_p_e) ) {
+			ERROR("Failed to get peaks from CXI file.\n");
 		}
 		if ( !iargs->no_revalidate ) {
 			validate_peaks(&image, iargs->min_snr,
@@ -231,31 +286,60 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		crystal_set_image(image.crystals[i], &image);
 	}
 
-	/* Default parameters */
-	image.div = 0.0;
-	image.bw = 0.00000001;
-	for ( i=0; i<image.n_crystals; i++ ) {
-		crystal_set_profile_radius(image.crystals[i], 0.01e9);
-		crystal_set_mosaicity(image.crystals[i], 0.0);  /* radians */
+	/* Set beam/crystal parameters */
+	if ( iargs->fix_divergence >= 0.0 ) {
+		image.div = iargs->fix_divergence;
+	} else {
+		image.div = 0.0;
+	}
+	if ( iargs->fix_bandwidth >= 0.0 ) {
+		image.bw = iargs->fix_bandwidth;
+	} else {
+		image.bw = 0.00000001;
+	}
+	if ( iargs->fix_profile_r >= 0.0 ) {
+		for ( i=0; i<image.n_crystals; i++ ) {
+			crystal_set_profile_radius(image.crystals[i],
+			                           iargs->fix_profile_r);
+			crystal_set_mosaicity(image.crystals[i], 0.0);
+		}
+	} else {
+		for ( i=0; i<image.n_crystals; i++ ) {
+			crystal_set_profile_radius(image.crystals[i], 0.02e9);
+			crystal_set_mosaicity(image.crystals[i], 0.0);
+		}
 	}
 
 	/* Integrate all the crystals at once - need all the crystals so that
 	 * overlaps can be detected. */
-	integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE, iargs->push_res,
-	                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
-	                INTDIAG_NONE, 0, 0, 0, results_pipe);
+	if ( iargs->fix_profile_r < 0.0 ) {
 
-	for ( i=0; i<image.n_crystals; i++ ) {
-		refine_radius(image.crystals[i]);
-		reflist_free(crystal_get_reflections(image.crystals[i]));
-	}
-
-	integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE,
+		integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE,
 		                iargs->push_res,
-			        iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
-			        iargs->int_diag, iargs->int_diag_h,
-			        iargs->int_diag_k, iargs->int_diag_l,
-			        results_pipe);
+		                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
+		                INTDIAG_NONE, 0, 0, 0, results_pipe);
+
+		for ( i=0; i<image.n_crystals; i++ ) {
+			refine_radius(image.crystals[i], image.features);
+			reflist_free(crystal_get_reflections(image.crystals[i]));
+		}
+
+		integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE,
+		                iargs->push_res,
+		                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
+		                iargs->int_diag, iargs->int_diag_h,
+		                iargs->int_diag_k, iargs->int_diag_l,
+		                results_pipe);
+	} else {
+
+		integrate_all_4(&image, iargs->int_meth, PMODEL_SCSPHERE,
+		                iargs->push_res,
+		                iargs->ir_inn, iargs->ir_mid, iargs->ir_out,
+		                iargs->int_diag, iargs->int_diag_h,
+		                iargs->int_diag_k, iargs->int_diag_l,
+		                results_pipe);
+
+	}
 
 	ret = write_chunk(st, &image, hdfile,
 	                  iargs->stream_peaks, iargs->stream_refls,
@@ -269,8 +353,9 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 		n += crystal_get_num_implausible_reflections(image.crystals[i]);
 	}
 	if ( n > 0 ) {
-		STATUS("WARNING: %i implausibly negative reflection%s in %s.\n",
-		       n, n>1?"s":"", image.filename);
+		STATUS("WARNING: %i implausibly negative reflection%s in %s "
+		       "%s\n", n, n>1?"s":"", image.filename,
+		       get_event_string(image.event));
 	}
 
 	for ( i=0; i<image.n_crystals; i++ ) {
@@ -290,5 +375,6 @@ void process_image(const struct index_args *iargs, struct pattern_args *pargs,
 	free(image.data);
 	if ( image.flags != NULL ) free(image.flags);
 	image_feature_list_free(image.features);
+	free_detector_geometry(image.det);
 	hdfile_close(hdfile);
 }

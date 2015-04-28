@@ -77,6 +77,12 @@ typedef enum {
 
 } StreamReadFlags;
 
+struct stuff_from_stream
+{
+	char **fields;
+	int n_fields;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif

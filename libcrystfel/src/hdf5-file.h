@@ -3,11 +3,11 @@
  *
  * Read/write HDF5 data files
  *
- * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  *
  * Authors:
- *   2009-2012 Thomas White <taw@physics.org>
+ *   2009-2015 Thomas White <taw@physics.org>
  *   2014      Valerio Mariani
 
  *
@@ -55,7 +55,7 @@ extern "C" {
 extern int hdf5_write(const char *filename, const void *data,
                       int width, int height, int type);
 
-extern int hdf5_write_image(const char *filename, struct image *image,
+extern int hdf5_write_image(const char *filename, const struct image *image,
                             char *element);
 
 extern int hdf5_read(struct hdfile *f, struct image *image,
@@ -76,15 +76,10 @@ extern char **hdfile_read_group(struct hdfile *f, int *n, const char *parent,
 extern int hdfile_set_first_image(struct hdfile *f, const char *group);
 extern void hdfile_close(struct hdfile *f);
 
-extern int hdfile_is_scalar(struct hdfile *f, const char *name, int verbose);
-char *hdfile_get_string_value(struct hdfile *f, const char *name,
-                              struct event* ev);
-extern int get_peaks(struct image *image, struct hdfile *f, const char *p,
-                     int cxi_format, struct filename_plus_event *fpe);
-extern double get_value(struct hdfile *f, const char *name);
+extern int get_peaks(struct image *image, struct hdfile *f, const char *p);
 
-extern double get_ev_based_value(struct hdfile *f, const char *name,
-                                 struct event *ev);
+extern int get_peaks_cxi(struct image *image, struct hdfile *f, const char *p,
+                         struct filename_plus_event *fpe);
 
 extern struct copy_hdf5_field *new_copy_hdf5_field_list(void);
 extern void free_copy_hdf5_field_list(struct copy_hdf5_field *f);
@@ -96,6 +91,12 @@ extern void add_copy_hdf5_field(struct copy_hdf5_field *copyme,
                                 const char *name);
 extern struct event_list *fill_event_list(struct hdfile* hdfile,
                                           struct detector* det);
+
+extern int hdfile_get_value(struct hdfile *f, const char *name,
+                            struct event *ev, void *val, hid_t memtype);
+extern int hdfile_is_scalar(struct hdfile *f, const char *name, int verbose);
+extern char *hdfile_get_string_value(struct hdfile *f, const char *name,
+                                     struct event *ev);
 
 #ifdef __cplusplus
 }

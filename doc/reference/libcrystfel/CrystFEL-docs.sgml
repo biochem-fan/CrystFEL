@@ -8,7 +8,7 @@
   <bookinfo>
     <title>CrystFEL Reference Manual</title>
     <releaseinfo>
-      For libcrystfel from CrystFEL 0.5.4.
+      For libcrystfel from CrystFEL 0.6.0.
     </releaseinfo>
     <abstract>
     This is the internal documentation for CrystFEL.  Unless you are looking at
@@ -40,6 +40,11 @@
   <chapter>
     <title>Crystals</title>
         <xi:include href="xml/crystal.xml"/>
+  </chapter>
+
+  <chapter>
+    <title>Events</title>
+        <xi:include href="xml/events.xml"/>
   </chapter>
 
   <chapter>

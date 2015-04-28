@@ -3,13 +3,13 @@
  *
  * Index patterns, output hkl+intensity etc.
  *
- * Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY,
+ * Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
  *                       a research centre of the Helmholtz Association.
  * Copyright © 2012 Richard Kirian
  * Copyright © 2012 Lorenzo Galli
  *
  * Authors:
- *   2010-2014 Thomas White <taw@physics.org>
+ *   2010-2015 Thomas White <taw@physics.org>
  *   2011      Richard Kirian
  *   2012      Lorenzo Galli
  *   2012      Chunhong Yoon
@@ -97,11 +97,9 @@ static void show_help(const char *s)
 "                           zaef  : Use Zaefferer (2000) gradient detection.\n"
 "                                    This is the default method.\n"
 "                           hdf5  : Get from a table in HDF5 file.\n"
+"                           cxi   : Get from CXI format HDF5 file.\n"
 "     --hdf5-peaks=<p>     Find peaks table in HDF5 file here.\n"
 "                           Default: /processing/hitfinder/peakinfo\n"
-"     --cxi-hdf5-peaks     Peaks in the HDF5 file are in CXI file format.\n"
-"                           Only used in conjunction with the --hdf5-peaks,\n"
-"                           ignored otherwise."
 "     --integration=<meth> Perform final pattern integration using <meth>.\n"
 "\n\n"
 "For more control over the process, you might need:\n\n"
@@ -125,11 +123,12 @@ static void show_help(const char *s)
 "    --check-hdf5-snr    Check SNR for peaks from --peaks=hdf5.\n"
 "    --peak-radius=<r>   Integration radii for peak search.\n"
 "    --int-radius=<r>    Set the integration radii.  Default: 4,5,7.\n"
-"-e, --image=<element>   Use this image from the HDF5 file.\n"
-"                          Example: /data/data0.\n"
-"                          Default: The first one found.\n"
 "    --push-res=<n>      Integrate higher than apparent resolution cutoff.\n"
 "    --highres=<n>       Absolute resolution cutoff in Angstroms.\n"
+"    --fix-profile-radius Fix the reciprocal space profile radius for spot\n"
+"                         prediction (default: automatically determine.\n"
+"    --fix-bandwidth     Set the bandwidth for spot prediction.\n"
+"    --fix-divergence    Set the divergence (full angle) for spot prediction.\n"
 "\n"
 "\nFor time-resolved stuff, you might want to use:\n\n"
 "     --copy-hdf5-field <f>  Copy the value of field <f> into the stream. You\n"
@@ -217,9 +216,7 @@ int main(int argc, char *argv[])
 	iargs.det = NULL;
 	iargs.peaks = PEAK_ZAEF;
 	iargs.beam = &beam;
-	iargs.element = NULL;
-	iargs.hdf5_peak_path = strdup("/processing/hitfinder/peakinfo");
-	iargs.cxi_hdf5_peaks = 0;
+	iargs.hdf5_peak_path = NULL;
 	iargs.copyme = NULL;
 	iargs.pk_inn = -1.0;
 	iargs.pk_mid = -1.0;
@@ -242,6 +239,9 @@ int main(int argc, char *argv[])
 	iargs.int_meth = integration_method("rings-nocen", NULL);
 	iargs.push_res = 0.0;
 	iargs.highres = +INFINITY;
+	iargs.fix_profile_r = -1.0;
+	iargs.fix_bandwidth = -1.0;
+	iargs.fix_divergence = -1.0;
 
 	/* Long options */
 	const struct option longopts[] = {
@@ -256,7 +256,6 @@ int main(int argc, char *argv[])
 		{"pdb",                1, NULL,               'p'},
 		{"prefix",             1, NULL,               'x'},
 		{"threshold",          1, NULL,               't'},
-		{"image",              1, NULL,               'e'},
 		{"beam",               1, NULL,               'b'},
 
 		/* Long-only options with no arguments */
@@ -269,7 +268,6 @@ int main(int argc, char *argv[])
 		{"no-use-saturated",   0, &iargs.use_saturated,      0},
 		{"no-revalidate",      0, &iargs.no_revalidate,      1},
 		{"check-hdf5-snr",     0, &iargs.check_hdf5_snr,     1},
-		{"cxi-hdf5-peaks",     0, &iargs.cxi_hdf5_peaks,     1},
 
 		/* Long-only options which don't actually do anything */
 		{"no-sat-corr",        0, &iargs.satcorr,            0},
@@ -298,12 +296,15 @@ int main(int argc, char *argv[])
 		{"res-push",           1, NULL,               19}, /* compat */
 		{"peak-radius",        1, NULL,               20},
 		{"highres",            1, NULL,               21},
+		{"fix-profile-radius", 1, NULL,               22},
+		{"fix-bandwidth",      1, NULL,               23},
+		{"fix-divergence",     1, NULL,               24},
 
 		{0, 0, NULL, 0}
 	};
 
 	/* Short options */
-	while ((c = getopt_long(argc, argv, "hi:o:z:p:x:j:g:t:e:vb:",
+	while ((c = getopt_long(argc, argv, "hi:o:z:p:x:j:g:t:vb:",
 	                        longopts, NULL)) != -1)
 	{
 		switch (c) {
@@ -353,10 +354,6 @@ int main(int argc, char *argv[])
 
 			case 't' :
 			iargs.threshold = strtof(optarg, NULL);
-			break;
-
-			case 'e' :
-			iargs.element = strdup(optarg);
 			break;
 
 			case 2 :
@@ -449,6 +446,28 @@ int main(int argc, char *argv[])
 			iargs.highres = 1.0 / (iargs.highres/1e10);
 			break;
 
+			case 22 :
+			if ( sscanf(optarg, "%f", &iargs.fix_profile_r) != 1 ) {
+				ERROR("Invalid value for "
+				      "--fix-profile-radius\n");
+				return 1;
+			}
+			break;
+
+			case 23 :
+			if ( sscanf(optarg, "%f", &iargs.fix_bandwidth) != 1 ) {
+				ERROR("Invalid value for --fix-bandwidth\n");
+				return 1;
+			}
+			break;
+
+			case 24 :
+			if ( sscanf(optarg, "%f", &iargs.fix_divergence) != 1 ) {
+				ERROR("Invalid value for --fix-divergence\n");
+				return 1;
+			}
+			break;
+
 			case 0 :
 			break;
 
@@ -490,11 +509,22 @@ int main(int argc, char *argv[])
 		iargs.peaks = PEAK_ZAEF;
 	} else if ( strcmp(speaks, "hdf5") == 0 ) {
 		iargs.peaks = PEAK_HDF5;
+	} else if ( strcmp(speaks, "cxi") == 0 ) {
+		iargs.peaks = PEAK_CXI;
 	} else {
 		ERROR("Unrecognised peak detection method '%s'\n", speaks);
 		return 1;
 	}
 	free(speaks);
+
+	/* Set default path for peaks, if appropriate */
+	if ( iargs.hdf5_peak_path == NULL ) {
+		if ( iargs.peaks == PEAK_HDF5 ) {
+			iargs.hdf5_peak_path = strdup("/processing/hitfinder/peakinfo");
+		} else if ( iargs.peaks == PEAK_CXI ) {
+			iargs.hdf5_peak_path = strdup("/entry_1/result_1");
+		}
+	}
 
 	if ( prefix == NULL ) {
 		prefix = strdup("");

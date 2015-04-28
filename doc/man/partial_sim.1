@@ -1,7 +1,8 @@
 .\"
 .\" partial_sim man page
 .\"
-.\" Copyright © 2012-2014 Thomas White <taw@physics.org>
+.\" Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY,
+.\"                       a research centre of the Helmholtz Association.
 .\"
 .\" Part of CrystFEL - crystallography with a FEL
 .\"
@@ -14,7 +15,6 @@ partial_sim \- calculate partial reflections
 .BR partial_sim
 \fB-o\fR \fIsimulated.stream\fR
 \fB-g\fR \fIgeometry.geom\fR
-\fB-b\fR \fIxrays.beam\fR
 \fB-p\fR \fIunitcell.pdb\fR
 [\fIoptions\fR] \fB...\fR
 
@@ -112,7 +112,7 @@ Use \fIn\fR threads for simulation.  Default: 1.
 .B
 .IP "\fB--images=\fR\fIprefix\fR"
 .PD
-For each chunk in the output stream, write a 'sketch' image in HDF5 format to \fIprefix\fR\fB/sim-\fR\fINNN\fR\fB.h5\fR, where \fINNN\fR is the sequence number of the chunk in the output stream.  This option is incompatible with \fB-j\fR.  The intensities in the peaks in the sketches will have th
+For each chunk in the output stream, write a 'sketch' image in HDF5 format to \fIprefix\fR\fB/sim-\fR\fINNN\fR\fB.h5\fR, where \fINNN\fR is the sequence number of the chunk in the output stream.  This option is incompatible with \fB-j\fR.  The intensities in the peaks in the sketches will be equal to the partial intensities in the stream, including noise and overall scaling factors. The images will also contain a random Poisson-distributed background according to \fB--background\fR.
 
 .PD 0
 .B
@@ -144,6 +144,10 @@ Set the radius of the scattering density surrounding each reciprocal lattice poi
 .PD
 Set the central photon energy, in eV, for the incident beam.  The default is \fB--photon-energy=9000\fR, i.e. 9 keV X-rays.
 
+.PD 0
+.IP \fB--really-random\fR
+.PD
+Seed the random number generator using the kernel random number generator (/dev/urandom).  This means that truly random numbers for the orientation and crystal size, instead of the same sequence being used for each new run.
 .SH AUTHOR
 This page was written by Thomas White.
 
@@ -151,7 +155,7 @@ This page was written by Thomas White.
 Report bugs to <taw@physics.org>, or visit <http://www.desy.de/~twhite/crystfel>.
 
 .SH COPYRIGHT AND DISCLAIMER
-Copyright © 2012-2014 Deutsches Elektronen-Synchrotron DESY, a research centre of the Helmholtz Association.
+Copyright © 2012-2015 Deutsches Elektronen-Synchrotron DESY, a research centre of the Helmholtz Association.
 .P
 partial_sim, and this manaul, are part of CrystFEL.
 .P
