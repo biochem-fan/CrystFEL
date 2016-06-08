@@ -5,6 +5,9 @@ This is a personal **unofficial** repository of CrystFEL for processing serial c
 The official CrystFEL website is http://www.desy.de/~twhite/crystfel/ and the repository is 
 https://stash.desy.de/projects/CRYS/repos/crystfel/browse.
 
+As of 2016, most features have been merged to the official repository, except for hdfsee improvements.
+Thus, I do not update this repository very often.
+
 Warning!
 --------
 
