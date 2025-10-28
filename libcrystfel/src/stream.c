@@ -1019,7 +1019,8 @@ static int read_headers(Stream *st)
 
 		if ( strcmp(line, STREAM_GEOM_START_MARKER"\n") == 0 ) {
 			if ( read_geometry_file(st) ) {
-				return 1;
+			ERROR("Failed to read geometry from a stream file. In the original version, this was a fatal error but let's ignore it and continue.\n");
+//				return 1;
 			}
 			done = 1;
 		} else {
