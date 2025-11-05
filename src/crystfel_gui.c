@@ -607,6 +607,196 @@ static gint reset_range_sig(GtkWidget *widget, struct crystfelproject *proj)
 	return FALSE;
 }
 
+enum
+{
+	COLUMN_ID = 0,
+	COLUMN_FILENAME,
+	COLUMN_EVENT,
+	COLUMN_SPOTS,
+	COLUMN_CRYSTALS,
+	COLUMN_RESOLUTION,
+	NUM_COLS
+};
+
+typedef struct
+{
+	struct crystfelproject *proj;
+	gboolean stopped;
+	gint cur_item;
+	GtkWidget *progress_dialog;
+	GtkProgressBar *progress_bar;
+	GtkListStore *list_store;
+	GtkWidget *table_window;
+} StreamLoaderData;
+
+static int load_more_events(StreamLoaderData *loader_data)
+{
+	struct crystfelproject *proj = loader_data->proj;
+	const gchar *results_name = gtk_combo_box_get_active_id(GTK_COMBO_BOX(proj->results_combo));
+	GtkListStore *raw_model = loader_data->list_store;
+
+	GtkTreeIter iter;
+	int idx_last = loader_data->cur_item + 20;
+	if (idx_last > proj->n_frames)
+	{
+		idx_last = proj->n_frames;
+	}
+
+//	printf("load_more_events: cur_item = %d, idx_last = %d\n", loader_data->cur_item, idx_last);
+
+	for (; loader_data->cur_item < idx_last && !loader_data->stopped; loader_data->cur_item++)
+	{
+		const int i = loader_data->cur_item;
+
+		gtk_list_store_append(raw_model, &iter);
+
+		int n_peaks = 0, n_crystals = 0;
+		float peak_resolution = 999;
+		struct image *image = find_indexed_image(proj, results_name,  proj->filenames[i], proj->events[i], 0);
+
+		if (image != NULL)
+		{
+			if (image->peak_resolution > 0)
+				peak_resolution = 1e10 / image->peak_resolution;
+			n_peaks = image_feature_count(image->features);
+			n_crystals = image->n_crystals;
+
+			image_free(image);
+		}
+
+		gtk_list_store_set(raw_model, &iter, COLUMN_ID, i, COLUMN_FILENAME, proj->filenames[i],
+		                   COLUMN_EVENT, proj->events[i], COLUMN_SPOTS, n_peaks, COLUMN_CRYSTALS, n_crystals,
+				   COLUMN_RESOLUTION, peak_resolution, -1);
+	}
+
+	if (loader_data->stopped || loader_data->cur_item == proj->n_frames)
+	{
+		gtk_widget_destroy(loader_data->progress_dialog);
+		gtk_widget_show_all(loader_data->table_window);
+
+		free(loader_data);
+		return G_SOURCE_REMOVE;
+	}
+	else
+	{
+		double fraction = loader_data->cur_item / (double)proj->n_frames;
+		gtk_progress_bar_set_fraction(loader_data->progress_bar, fraction);
+
+		gchar *text = g_strdup_printf("Loading %d of %d events", loader_data->cur_item, proj->n_frames);
+		gtk_progress_bar_set_text(loader_data->progress_bar, text);
+		g_free(text);
+
+		return G_SOURCE_CONTINUE;
+	}
+}
+
+static void progress_dialog_sig(GtkDialog *dialog, gint response_id, StreamLoaderData *loader_data)
+{
+	if (response_id == GTK_RESPONSE_CANCEL)
+	{
+		loader_data->stopped = TRUE;
+	}
+}
+
+static void event_selection_sig(GtkTreeSelection *selection, struct crystfelproject *proj)
+{
+	GtkTreeIter iter;
+	GtkTreeModel *model;
+
+	if (gtk_tree_selection_get_selected(selection, &model, &iter))\
+	{
+		gint item_id;
+		gtk_tree_model_get(model, &iter, COLUMN_ID, &item_id, -1);
+
+		proj->cur_frame = item_id;
+		update_imageview(proj);
+	}
+}
+
+static gint event_list_sig(GtkWidget *widget, struct crystfelproject *proj)
+{
+	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+	gtk_window_set_title(GTK_WINDOW(window), "Event list");
+	gtk_window_set_default_size(GTK_WINDOW(window), 800, 800);
+	gtk_container_set_border_width(GTK_CONTAINER(window), 10);
+//	g_signal_connect(window, "destroy", G_CALLBACK(gtk_widget_destroy), NULL);
+
+	GtkListStore *raw_model = gtk_list_store_new(NUM_COLS, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_FLOAT);
+	GtkTreeModelSort *model = (GtkTreeModelSort*)gtk_tree_model_sort_new_with_model(GTK_TREE_MODEL(raw_model));
+	g_object_unref(raw_model);
+	GtkWidget *event_table = gtk_tree_view_new_with_model(GTK_TREE_MODEL(model));
+	g_object_unref(model); // event_table now owns the model
+
+	// Set up columns
+	GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+	GtkTreeViewColumn *col_filename = gtk_tree_view_column_new_with_attributes ("File Name", renderer,
+			                      "text", COLUMN_FILENAME, NULL);
+	GtkTreeViewColumn *col_event = gtk_tree_view_column_new_with_attributes ("Event Name", renderer,
+			                      "text", COLUMN_EVENT, NULL);
+	GtkTreeViewColumn *col_spots = gtk_tree_view_column_new_with_attributes ("#Spots", renderer,
+			                      "text", COLUMN_SPOTS, NULL);
+	GtkTreeViewColumn *col_crystals = gtk_tree_view_column_new_with_attributes ("#Crystals", renderer,
+			                      "text", COLUMN_CRYSTALS, NULL);
+	GtkTreeViewColumn *col_resolution = gtk_tree_view_column_new_with_attributes (" Peak Resolution", renderer,
+			                      "text", COLUMN_RESOLUTION, NULL);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(event_table), col_filename);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(event_table), col_event);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(event_table), col_spots);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(event_table), col_resolution);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(event_table), col_crystals);
+	gtk_tree_view_column_set_sort_column_id(col_filename, COLUMN_FILENAME);
+	gtk_tree_view_column_set_sort_column_id(col_event, COLUMN_EVENT);
+	gtk_tree_view_column_set_sort_column_id(col_spots, COLUMN_SPOTS);
+	gtk_tree_view_column_set_sort_column_id(col_crystals, COLUMN_CRYSTALS);
+	gtk_tree_view_column_set_sort_column_id(col_resolution, COLUMN_RESOLUTION);
+
+	gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(event_table), TRUE);
+
+	// Make this scrollable
+	GtkWidget *scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+	gtk_container_add(GTK_CONTAINER(scrolled_window), event_table);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
+	                               GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_container_add(GTK_CONTAINER(window), scrolled_window);
+
+	// Row selection
+	GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(event_table));
+	gtk_tree_selection_set_mode(selection, GTK_SELECTION_SINGLE);
+	g_signal_connect(selection, "changed", G_CALLBACK(event_selection_sig), proj);
+
+	// Progress bar
+	GtkWidget *dialog = gtk_dialog_new_with_buttons("Loading Data", GTK_WINDOW(GTK_WINDOW_TOPLEVEL),
+	                         GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                 "Cancel", GTK_RESPONSE_CANCEL, NULL);
+	gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
+
+	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+	GtkWidget *label = gtk_label_new("Reading event data ...");
+	gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
+
+	GtkWidget *progress_bar = gtk_progress_bar_new();
+	gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(progress_bar), TRUE);
+	gtk_progress_bar_set_text(GTK_PROGRESS_BAR(progress_bar), "Preparing to load...");
+	gtk_box_pack_start(GTK_BOX(vbox), progress_bar, FALSE, FALSE, 0);
+	gtk_container_add(GTK_CONTAINER(content_area), vbox);
+
+	StreamLoaderData *loader_data = (StreamLoaderData*)malloc(sizeof(StreamLoaderData));
+	loader_data->proj = proj;
+	loader_data->stopped = FALSE;
+	loader_data->cur_item = 0;
+	loader_data->progress_dialog = dialog;
+	loader_data->progress_bar = (GtkProgressBar*)progress_bar;
+	loader_data->list_store = raw_model;
+	loader_data->table_window = window;
+
+	g_signal_connect(dialog, "response", G_CALLBACK(progress_dialog_sig), loader_data);
+	g_idle_add((int(*)(void*))load_more_events, loader_data);
+
+	gtk_widget_show_all(dialog);
+	return FALSE;
+}
 
 static gint first_frame_sig(GtkWidget *widget,
                             struct crystfelproject *proj)
@@ -936,6 +1126,7 @@ static void add_menu_bar(struct crystfelproject *proj, GtkWidget *vbox)
 		"	<menuitem name=\"labelpanels\" action=\"LabelPanelsAction\" />"
 		"	<menuitem name=\"centre\" action=\"CentreAction\" />"
 		"	<menuitem name=\"resrings\" action=\"ResolutionRingsAction\" />"
+		"	<menuitem name=\"eventlist\" action=\"EventListAction\" />"
 		"       <separator />"
 		"	<menuitem name=\"resetzoom\" action=\"ResetZoomAction\" />"
 		"	<menu name=\"colorscale\" action=\"ColourSchemeAction\">"
@@ -970,6 +1161,8 @@ static void add_menu_bar(struct crystfelproject *proj, GtkWidget *vbox)
 			G_CALLBACK(reset_zoom_sig) },
 		{ "ResetRangeAction", NULL, "Reset colour scale", NULL, NULL,
 			G_CALLBACK(reset_range_sig) },
+		{ "EventListAction", NULL, "Show event list", NULL, NULL,
+			G_CALLBACK(event_list_sig) },
 		{ "ColourSchemeAction", NULL, "Colour scheme", NULL, NULL, NULL },
 
 		{ "ToolsAction", NULL, "_Tools", NULL, NULL, NULL },

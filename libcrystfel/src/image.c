@@ -1515,6 +1515,7 @@ struct image *image_new()
 	image->bw = -1.0;
 	image->peak_resolution = -1.0;
 	image->features = NULL;
+	image->header_num_peaks = 0;
 	image->owns_peaklist = 1;
 
 	return image;

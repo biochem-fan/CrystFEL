@@ -189,6 +189,9 @@ struct image
 	/** Re-usable data array structure, or NULL if not used */
 	ImageDataArrays         *ida;
 
+	/** The number of peaks in the header; does NOT necessarily match len(features) */
+	int                     header_num_peaks;
+
 	/** If set, then 'features' should be freed with the image.
 	 * Otherwise, it is managed externally (e.g. by Julia) */
 	int                      owns_peaklist;

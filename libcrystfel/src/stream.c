@@ -780,8 +780,8 @@ struct image *stream_read_chunk(Stream *st, StreamFlags srf)
 	image->data_source_type = DATA_SOURCE_TYPE_NONE;
 
 	do {
-		int ser;
-		float div, bw;
+		int ser, num_peaks;
+		float div, bw, peak_resolution;
 
 		rval = fgets(line, 1023, st->fh);
 		st->ln++;
@@ -791,6 +791,7 @@ struct image *stream_read_chunk(Stream *st, StreamFlags srf)
 
 		chomp(line);
 
+		// TODO: Takanori wonders why we don't use `else if` here.
 		if ( strncmp(line, "Image filename: ", 16) == 0 ) {
 			image->filename = cfstrdup(line+16);
 			have_filename = 1;
@@ -844,6 +845,13 @@ struct image *stream_read_chunk(Stream *st, StreamFlags srf)
 			image->serial = ser;
 		}
 
+		if ( sscanf(line, "num_peaks = %d", &num_peaks) == 1 ) {
+			image->header_num_peaks = num_peaks;
+		}
+
+		if ( sscanf(line, "peak_resolution = %f nm^-1", &peak_resolution) == 1) {
+			image->peak_resolution = peak_resolution * 1e9;
+		}
 
 		if ( (srf & STREAM_PEAKS)
 		    && strcmp(line, STREAM_PEAK_LIST_START_MARKER) == 0 ) {
