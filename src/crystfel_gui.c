@@ -635,8 +635,7 @@ static int load_more_events(StreamLoaderData *loader_data)
 	const gchar *results_name = gtk_combo_box_get_active_id(GTK_COMBO_BOX(proj->results_combo));
 	GtkListStore *raw_model = loader_data->list_store;
 
-	GtkTreeIter iter;
-	int idx_last = loader_data->cur_item + 20;
+	int idx_last = loader_data->cur_item + 50;
 	if (idx_last > proj->n_frames)
 	{
 		idx_last = proj->n_frames;
@@ -647,8 +646,6 @@ static int load_more_events(StreamLoaderData *loader_data)
 	for (; loader_data->cur_item < idx_last && !loader_data->stopped; loader_data->cur_item++)
 	{
 		const int i = loader_data->cur_item;
-
-		gtk_list_store_append(raw_model, &iter);
 
 		int n_peaks = 0, n_crystals = 0;
 		float peak_resolution = 999;
@@ -664,7 +661,7 @@ static int load_more_events(StreamLoaderData *loader_data)
 			image_free(image);
 		}
 
-		gtk_list_store_set(raw_model, &iter, COLUMN_ID, i, COLUMN_FILENAME, proj->filenames[i],
+		gtk_list_store_insert_with_values(raw_model, NULL, -1, COLUMN_ID, i, COLUMN_FILENAME, proj->filenames[i],
 		                   COLUMN_EVENT, proj->events[i], COLUMN_SPOTS, n_peaks, COLUMN_CRYSTALS, n_crystals,
 				   COLUMN_RESOLUTION, peak_resolution, -1);
 	}
@@ -715,6 +712,8 @@ static void event_selection_sig(GtkTreeSelection *selection, struct crystfelproj
 
 static gint event_list_sig(GtkWidget *widget, struct crystfelproject *proj)
 {
+	// TODO: block opening multiple tables
+
 	GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(window), "Event list");
 	gtk_window_set_default_size(GTK_WINDOW(window), 800, 800);
@@ -724,6 +723,7 @@ static gint event_list_sig(GtkWidget *widget, struct crystfelproject *proj)
 	GtkListStore *raw_model = gtk_list_store_new(NUM_COLS, G_TYPE_INT, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_UINT64, G_TYPE_INT, G_TYPE_FLOAT);
 	GtkTreeModelSort *model = (GtkTreeModelSort*)gtk_tree_model_sort_new_with_model(GTK_TREE_MODEL(raw_model));
 	g_object_unref(raw_model);
+	// TODO: Try setting the model later. Will it improve the performance?
 	GtkWidget *event_table = gtk_tree_view_new_with_model(GTK_TREE_MODEL(model));
 	g_object_unref(model); // event_table now owns the model
 
